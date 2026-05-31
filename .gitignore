@@ -1,0 +1,16 @@
+node_modules/
+frontend/node_modules/
+
+.expo/
+dist/
+web-build/
+
+__pycache__/
+*.pyc
+backend/.venv/
+venv/
+.env
+
+.DS_Store
+.vscode/
+.idea/
