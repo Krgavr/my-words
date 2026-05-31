@@ -10,6 +10,7 @@ __pycache__/
 backend/.venv/
 venv/
 .env
+frontend/.env
 
 .DS_Store
 .vscode/
