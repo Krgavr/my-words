@@ -3,3 +3,6 @@ uvicorn[standard]
 psycopg2-binary
 sqlalchemy
 python-dotenv
+pyjwt
+pwdlib[argon2]
+email-validator
