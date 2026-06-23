@@ -1,6 +1,12 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    EmailStr,
+    Field,
+    field_validator,
+)
 
 
 class UserCreate(BaseModel):
@@ -26,3 +32,39 @@ class UserResponse(BaseModel):
 class Token(BaseModel):
     access_token: str
     token_type: str
+
+
+class ModuleBase(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    source_language: str = Field(min_length=1, max_length=50)
+    target_language: str = Field(min_length=1, max_length=50)
+
+    @field_validator(
+        "name",
+        "source_language",
+        "target_language",
+    )
+    @classmethod
+    def remove_extra_spaces(cls, value: str) -> str:
+        cleaned_value = value.strip()
+
+        if not cleaned_value:
+            raise ValueError("Hodnota nesmí být prázdná.")
+
+        return cleaned_value
+
+
+class ModuleCreate(ModuleBase):
+    pass
+
+
+class ModuleUpdate(ModuleBase):
+    pass
+
+
+class ModuleResponse(ModuleBase):
+    id: int
+    user_id: int
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
