@@ -235,6 +235,28 @@ async function createWordRequest(
   return (await response.json()) as WordCard;
 }
 
+async function updateWordRequest(
+  token: string,
+  wordId: number,
+  wordData: WordData,
+): Promise<WordCard> {
+  const response = await fetch(`${API_URL}/words/${wordId}`, {
+    method: 'PUT',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(wordData),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Server vrátil chybu ${response.status}.`);
+  }
+
+  return (await response.json()) as WordCard;
+}
+
 async function updateWordStatusRequest(
   token: string,
   wordId: number,
@@ -399,6 +421,14 @@ export default function App() {
     null,
   );
 
+  const [editingWordId, setEditingWordId] = useState<number | null>(
+    null,
+  );
+  const [editWord, setEditWord] = useState('');
+  const [editTranslation, setEditTranslation] = useState('');
+  const [isSavingEditedWord, setIsSavingEditedWord] =
+    useState(false);
+
   useEffect(() => {
     const restoreSession = async () => {
       try {
@@ -559,6 +589,8 @@ export default function App() {
       setEditTargetLanguage('');
       setNewWord('');
       setNewTranslation('');
+      setEditWord('');
+      setEditTranslation('');
 
       setIsCreateFormOpen(false);
       setIsCreateWordFormOpen(false);
@@ -566,6 +598,7 @@ export default function App() {
       setDeletingModuleId(null);
       setUpdatingWordId(null);
       setDeletingWordId(null);
+      setEditingWordId(null);
 
       setIsError(false);
       setIsModulesMessageError(false);
@@ -794,6 +827,9 @@ export default function App() {
     setIsCreateWordFormOpen(false);
     setNewWord('');
     setNewTranslation('');
+    setEditingWordId(null);
+    setEditWord('');
+    setEditTranslation('');
     setWordsMessage('');
     setIsWordsMessageError(false);
     setIsWordsLoading(true);
@@ -816,6 +852,9 @@ export default function App() {
     setIsCreateWordFormOpen(false);
     setNewWord('');
     setNewTranslation('');
+    setEditingWordId(null);
+    setEditWord('');
+    setEditTranslation('');
     setWordsMessage('');
     setIsWordsMessageError(false);
     setUpdatingWordId(null);
@@ -823,6 +862,10 @@ export default function App() {
   };
 
   const handleOpenCreateWordForm = () => {
+    setEditingWordId(null);
+    setEditWord('');
+    setEditTranslation('');
+
     setIsCreateWordFormOpen(true);
     setWordsMessage('');
     setIsWordsMessageError(false);
@@ -880,6 +923,83 @@ export default function App() {
       setIsWordsMessageError(true);
     } finally {
       setIsCreatingWord(false);
+    }
+  };
+
+  const handleOpenEditWordForm = (wordCard: WordCard) => {
+    setIsCreateWordFormOpen(false);
+    setNewWord('');
+    setNewTranslation('');
+
+    setEditingWordId(wordCard.id);
+    setEditWord(wordCard.word);
+    setEditTranslation(wordCard.translation);
+
+    setWordsMessage('');
+    setIsWordsMessageError(false);
+  };
+
+  const handleCancelEditWord = () => {
+    setEditingWordId(null);
+    setEditWord('');
+    setEditTranslation('');
+
+    setWordsMessage('');
+    setIsWordsMessageError(false);
+  };
+
+  const handleUpdateWord = async () => {
+    if (!accessToken || editingWordId === null) {
+      setWordsMessage(
+        'Pro úpravu slovíčka se musíte přihlásit.',
+      );
+      setIsWordsMessageError(true);
+      return;
+    }
+
+    const normalizedWord = editWord.trim();
+    const normalizedTranslation = editTranslation.trim();
+
+    if (!normalizedWord || !normalizedTranslation) {
+      setWordsMessage('Vyplňte slovíčko i jeho překlad.');
+      setIsWordsMessageError(true);
+      return;
+    }
+
+    setIsSavingEditedWord(true);
+    setWordsMessage('');
+    setIsWordsMessageError(false);
+
+    try {
+      const updatedWord = await updateWordRequest(
+        accessToken,
+        editingWordId,
+        {
+          word: normalizedWord,
+          translation: normalizedTranslation,
+        },
+      );
+
+      setWords((currentWords) =>
+        currentWords.map((currentWord) =>
+          currentWord.id === updatedWord.id
+            ? updatedWord
+            : currentWord,
+        ),
+      );
+
+      setEditingWordId(null);
+      setEditWord('');
+      setEditTranslation('');
+
+      setWordsMessage('');
+      setIsWordsMessageError(false);
+    } catch (error) {
+      console.error('Chyba při úpravě slovíčka:', error);
+      setWordsMessage('Změny slovíčka se nepodařilo uložit.');
+      setIsWordsMessageError(true);
+    } finally {
+      setIsSavingEditedWord(false);
     }
   };
 
@@ -951,6 +1071,12 @@ export default function App() {
           (currentWord) => currentWord.id !== wordCard.id,
         ),
       );
+
+      if (editingWordId === wordCard.id) {
+        setEditingWordId(null);
+        setEditWord('');
+        setEditTranslation('');
+      }
 
       setWordsMessage('');
       setIsWordsMessageError(false);
@@ -1146,6 +1272,88 @@ export default function App() {
               </View>
             )}
 
+            {editingWordId !== null && (
+              <View style={styles.formCard}>
+                <Text style={styles.formCardTitle}>
+                  Upravit slovíčko
+                </Text>
+
+                <Text style={styles.formCardDescription}>
+                  Změňte slovíčko nebo jeho překlad.
+                </Text>
+
+                <View style={styles.formCardFields}>
+                  <View style={styles.wordsFormRow}>
+                    <View style={styles.wordFormField}>
+                      <Text style={styles.label}>
+                        Slovíčko ({selectedModule.source_language})
+                      </Text>
+
+                      <TextInput
+                        style={styles.input}
+                        value={editWord}
+                        onChangeText={setEditWord}
+                        placeholder="Slovíčko"
+                        editable={!isSavingEditedWord}
+                        maxLength={255}
+                        autoCapitalize="none"
+                      />
+                    </View>
+
+                    <View style={styles.wordFormField}>
+                      <Text style={styles.label}>
+                        Překlad ({selectedModule.target_language})
+                      </Text>
+
+                      <TextInput
+                        style={styles.input}
+                        value={editTranslation}
+                        onChangeText={setEditTranslation}
+                        placeholder="Překlad"
+                        editable={!isSavingEditedWord}
+                        maxLength={255}
+                        onSubmitEditing={handleUpdateWord}
+                      />
+                    </View>
+                  </View>
+                </View>
+
+                <View style={styles.formButtons}>
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.cancelButton,
+                      pressed && styles.buttonPressed,
+                    ]}
+                    onPress={handleCancelEditWord}
+                    disabled={isSavingEditedWord}
+                  >
+                    <Text style={styles.cancelButtonText}>
+                      Zrušit
+                    </Text>
+                  </Pressable>
+
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.submitButton,
+                      pressed && styles.buttonPressed,
+                      isSavingEditedWord &&
+                        styles.disabledButton,
+                    ]}
+                    onPress={handleUpdateWord}
+                    disabled={isSavingEditedWord}
+                  >
+                    {isSavingEditedWord ? (
+                      <ActivityIndicator color="#ffffff" />
+                    ) : (
+                      <Text style={styles.submitButtonText}>
+                        Uložit změny
+                      </Text>
+                    )}
+                  </Pressable>
+                </View>
+              </View>
+            )}
+
             {wordsMessage !== '' && (
               <Text
                 style={[
@@ -1193,9 +1401,16 @@ export default function App() {
                 {words.map((wordCard) => {
                   const isUpdating = updatingWordId === wordCard.id;
                   const isDeleting = deletingWordId === wordCard.id;
+                  const isEditing = editingWordId === wordCard.id;
 
                   return (
-                    <View key={wordCard.id} style={styles.wordCard}>
+                    <View
+                      key={wordCard.id}
+                      style={[
+                        styles.wordCard,
+                        isEditing && styles.activeWordCard,
+                      ]}
+                    >
                       <View style={styles.wordInformation}>
                         <Text style={styles.wordText}>{wordCard.word}</Text>
                         <Text style={styles.translationText}>
@@ -1239,6 +1454,7 @@ export default function App() {
                           disabled={
                             isUpdating ||
                             isDeleting ||
+                            isSavingEditedWord ||
                             updatingWordId !== null ||
                             deletingWordId !== null
                           }
@@ -1268,6 +1484,29 @@ export default function App() {
 
                         <Pressable
                           style={({ pressed }) => [
+                            styles.wordEditButton,
+                            pressed && styles.buttonPressed,
+                            isEditing && styles.disabledButton,
+                          ]}
+                          onPress={() =>
+                            handleOpenEditWordForm(wordCard)
+                          }
+                          disabled={
+                            isEditing ||
+                            isDeleting ||
+                            isUpdating ||
+                            isSavingEditedWord ||
+                            deletingWordId !== null ||
+                            updatingWordId !== null
+                          }
+                        >
+                          <Text style={styles.wordEditButtonText}>
+                            Upravit
+                          </Text>
+                        </Pressable>
+
+                        <Pressable
+                          style={({ pressed }) => [
                             styles.wordDeleteButton,
                             pressed && styles.buttonPressed,
                             isDeleting && styles.disabledButton,
@@ -1278,6 +1517,7 @@ export default function App() {
                           disabled={
                             isDeleting ||
                             isUpdating ||
+                            isSavingEditedWord ||
                             deletingWordId !== null ||
                             updatingWordId !== null
                           }
@@ -2357,6 +2597,10 @@ const styles = StyleSheet.create({
     borderRadius: 16,
   },
 
+  activeWordCard: {
+    borderColor: '#4967e8',
+  },
+
   wordInformation: {
     flexGrow: 1,
     marginRight: 20,
@@ -2448,6 +2692,26 @@ const styles = StyleSheet.create({
 
   markUnknownButtonText: {
     color: '#9a661f',
+  },
+
+  wordEditButton: {
+    minWidth: 82,
+    minHeight: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 10,
+    marginBottom: 6,
+    paddingHorizontal: 16,
+    backgroundColor: '#f2f4f8',
+    borderWidth: 1,
+    borderColor: '#dce0eb',
+    borderRadius: 10,
+  },
+
+  wordEditButtonText: {
+    color: '#4f5668',
+    fontSize: 13,
+    fontWeight: '700',
   },
 
   wordDeleteButton: {
