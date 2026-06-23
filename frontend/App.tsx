@@ -46,6 +46,20 @@ type ModuleData = {
   target_language: string;
 };
 
+type WordCard = {
+  id: number;
+  module_id: number;
+  word: string;
+  translation: string;
+  is_known: boolean;
+  created_at: string;
+};
+
+type WordData = {
+  word: string;
+  translation: string;
+};
+
 const API_URL = (
   process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8000'
 ).replace(/\/$/, '');
@@ -176,6 +190,53 @@ async function deleteModuleRequest(
   }
 }
 
+async function getModuleWords(
+  token: string,
+  moduleId: number,
+): Promise<WordCard[]> {
+  const response = await fetch(
+    `${API_URL}/modules/${moduleId}/words`,
+    {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(`Server vrátil chybu ${response.status}.`);
+  }
+
+  return (await response.json()) as WordCard[];
+}
+
+async function createWordRequest(
+  token: string,
+  moduleId: number,
+  wordData: WordData,
+): Promise<WordCard> {
+  const response = await fetch(
+    `${API_URL}/modules/${moduleId}/words`,
+    {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(wordData),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(`Server vrátil chybu ${response.status}.`);
+  }
+
+  return (await response.json()) as WordCard;
+}
+
 async function confirmModuleDeletion(
   module: VocabularyModule,
 ): Promise<boolean> {
@@ -226,14 +287,20 @@ export default function App() {
 
   const [message, setMessage] = useState('');
   const [modulesMessage, setModulesMessage] = useState('');
+  const [wordsMessage, setWordsMessage] = useState('');
 
   const [isError, setIsError] = useState(false);
+
   const [isModulesMessageError, setIsModulesMessageError] =
+    useState(false);
+
+  const [isWordsMessageError, setIsWordsMessageError] =
     useState(false);
 
   const [isLoading, setIsLoading] = useState(false);
   const [isInitializing, setIsInitializing] = useState(true);
   const [isModulesLoading, setIsModulesLoading] = useState(false);
+  const [isWordsLoading, setIsWordsLoading] = useState(false);
 
   const [isCreateFormOpen, setIsCreateFormOpen] =
     useState(false);
@@ -241,6 +308,7 @@ export default function App() {
   const [moduleName, setModuleName] = useState('');
   const [sourceLanguage, setSourceLanguage] = useState('');
   const [targetLanguage, setTargetLanguage] = useState('');
+
   const [isCreatingModule, setIsCreatingModule] =
     useState(false);
 
@@ -249,8 +317,10 @@ export default function App() {
   >(null);
 
   const [editModuleName, setEditModuleName] = useState('');
+
   const [editSourceLanguage, setEditSourceLanguage] =
     useState('');
+
   const [editTargetLanguage, setEditTargetLanguage] =
     useState('');
 
@@ -260,6 +330,20 @@ export default function App() {
   const [deletingModuleId, setDeletingModuleId] = useState<
     number | null
   >(null);
+
+  const [selectedModule, setSelectedModule] =
+    useState<VocabularyModule | null>(null);
+
+  const [words, setWords] = useState<WordCard[]>([]);
+
+  const [isCreateWordFormOpen, setIsCreateWordFormOpen] =
+    useState(false);
+
+  const [newWord, setNewWord] = useState('');
+  const [newTranslation, setNewTranslation] = useState('');
+
+  const [isCreatingWord, setIsCreatingWord] =
+    useState(false);
 
   useEffect(() => {
     const restoreSession = async () => {
@@ -417,11 +501,14 @@ export default function App() {
       setAccessToken(null);
       setCurrentUser(null);
       setModules([]);
+      setSelectedModule(null);
+      setWords([]);
 
       setLogin('');
       setPassword('');
       setMessage('');
       setModulesMessage('');
+      setWordsMessage('');
 
       setModuleName('');
       setSourceLanguage('');
@@ -431,12 +518,18 @@ export default function App() {
       setEditSourceLanguage('');
       setEditTargetLanguage('');
 
+      setNewWord('');
+      setNewTranslation('');
+
       setIsCreateFormOpen(false);
+      setIsCreateWordFormOpen(false);
+
       setEditingModuleId(null);
       setDeletingModuleId(null);
 
       setIsError(false);
       setIsModulesMessageError(false);
+      setIsWordsMessageError(false);
     } catch (error) {
       console.error('Chyba při odhlašování:', error);
 
@@ -485,8 +578,10 @@ export default function App() {
     }
 
     const normalizedName = moduleName.trim();
+
     const normalizedSourceLanguage =
       sourceLanguage.trim();
+
     const normalizedTargetLanguage =
       targetLanguage.trim();
 
@@ -524,6 +619,7 @@ export default function App() {
       setModuleName('');
       setSourceLanguage('');
       setTargetLanguage('');
+
       setIsCreateFormOpen(false);
 
       setModulesMessage('Modul byl úspěšně vytvořen.');
@@ -577,8 +673,10 @@ export default function App() {
     }
 
     const normalizedName = editModuleName.trim();
+
     const normalizedSourceLanguage =
       editSourceLanguage.trim();
+
     const normalizedTargetLanguage =
       editTargetLanguage.trim();
 
@@ -625,6 +723,7 @@ export default function App() {
       setModulesMessage(
         'Změny modulu byly úspěšně uloženy.',
       );
+
       setIsModulesMessageError(false);
     } catch (error) {
       console.error('Chyba při úpravě modulu:', error);
@@ -632,6 +731,7 @@ export default function App() {
       setModulesMessage(
         'Změny modulu se nepodařilo uložit.',
       );
+
       setIsModulesMessageError(true);
     } finally {
       setIsUpdatingModule(false);
@@ -679,6 +779,7 @@ export default function App() {
       setModulesMessage(
         `Modul „${module.name}“ byl úspěšně odstraněn.`,
       );
+
       setIsModulesMessageError(false);
     } catch (error) {
       console.error(
@@ -689,20 +790,150 @@ export default function App() {
       setModulesMessage(
         `Modul „${module.name}“ se nepodařilo odstranit.`,
       );
+
       setIsModulesMessageError(true);
     } finally {
       setDeletingModuleId(null);
     }
   };
 
-  const handleOpenModule = (
+  const handleOpenModule = async (
     module: VocabularyModule,
   ) => {
-    setModulesMessage(
-      `Otevření modulu „${module.name}“ přidáme později.`,
-    );
+    if (!accessToken) {
+      setModulesMessage(
+        'Pro otevření modulu se musíte přihlásit.',
+      );
+      setIsModulesMessageError(true);
+      return;
+    }
 
-    setIsModulesMessageError(false);
+    setSelectedModule(module);
+    setWords([]);
+
+    setIsCreateWordFormOpen(false);
+    setNewWord('');
+    setNewTranslation('');
+
+    setWordsMessage('');
+    setIsWordsMessageError(false);
+    setIsWordsLoading(true);
+
+    try {
+      const moduleWords = await getModuleWords(
+        accessToken,
+        module.id,
+      );
+
+      setWords(moduleWords);
+    } catch (error) {
+      console.error('Chyba při načítání slovíček:', error);
+
+      setWordsMessage(
+        'Slovíčka se nepodařilo načíst.',
+      );
+
+      setIsWordsMessageError(true);
+    } finally {
+      setIsWordsLoading(false);
+    }
+  };
+
+  const handleBackToModules = () => {
+    setSelectedModule(null);
+    setWords([]);
+
+    setIsCreateWordFormOpen(false);
+    setNewWord('');
+    setNewTranslation('');
+
+    setWordsMessage('');
+    setIsWordsMessageError(false);
+  };
+
+  const handleOpenCreateWordForm = () => {
+    setIsCreateWordFormOpen(true);
+    setWordsMessage('');
+    setIsWordsMessageError(false);
+  };
+
+  const handleCancelCreateWord = () => {
+    setIsCreateWordFormOpen(false);
+
+    setNewWord('');
+    setNewTranslation('');
+
+    setWordsMessage('');
+    setIsWordsMessageError(false);
+  };
+
+  const handleCreateWord = async () => {
+    if (!accessToken || !selectedModule) {
+      setWordsMessage(
+        'Pro vytvoření slovíčka se musíte přihlásit.',
+      );
+
+      setIsWordsMessageError(true);
+      return;
+    }
+
+    const normalizedWord = newWord.trim();
+
+    const normalizedTranslation =
+      newTranslation.trim();
+
+    if (!normalizedWord || !normalizedTranslation) {
+      setWordsMessage(
+        'Vyplňte slovíčko i jeho překlad.',
+      );
+
+      setIsWordsMessageError(true);
+      return;
+    }
+
+    setIsCreatingWord(true);
+    setWordsMessage('');
+    setIsWordsMessageError(false);
+
+    try {
+      const createdWord = await createWordRequest(
+        accessToken,
+        selectedModule.id,
+        {
+          word: normalizedWord,
+          translation: normalizedTranslation,
+        },
+      );
+
+      setWords((currentWords) => [
+        createdWord,
+        ...currentWords,
+      ]);
+
+      setNewWord('');
+      setNewTranslation('');
+
+      setIsCreateWordFormOpen(false);
+
+      setWordsMessage(
+        'Slovíčko bylo úspěšně přidáno.',
+      );
+
+      setIsWordsMessageError(false);
+    } catch (error) {
+      console.error(
+        'Chyba při vytváření slovíčka:',
+        error,
+      );
+
+      setWordsMessage(
+        'Slovíčko se nepodařilo přidat.',
+      );
+
+      setIsWordsMessageError(true);
+    } finally {
+      setIsCreatingWord(false);
+    }
   };
 
   if (isInitializing) {
@@ -718,6 +949,314 @@ export default function App() {
             Načítání aplikace...
           </Text>
         </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (
+    accessToken &&
+    currentUser &&
+    selectedModule
+  ) {
+    const knownWordsCount = words.filter(
+      (wordCard) => wordCard.is_known,
+    ).length;
+
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <ScrollView
+          contentContainerStyle={styles.homePage}
+          keyboardShouldPersistTaps="handled"
+        >
+          <View style={styles.homeContainer}>
+            <View style={styles.header}>
+              <Text style={styles.homeLogo}>
+                My Words
+              </Text>
+
+              <Pressable
+                style={({ pressed }) => [
+                  styles.logoutButton,
+                  pressed && styles.buttonPressed,
+                  isLoading && styles.disabledButton,
+                ]}
+                onPress={handleLogout}
+                disabled={isLoading}
+              >
+                {isLoading ? (
+                  <ActivityIndicator color="#4967e8" />
+                ) : (
+                  <Text style={styles.logoutButtonText}>
+                    Odhlásit se
+                  </Text>
+                )}
+              </Pressable>
+            </View>
+
+            <Pressable
+              style={({ pressed }) => [
+                styles.backButton,
+                pressed && styles.buttonPressed,
+              ]}
+              onPress={handleBackToModules}
+            >
+              <Text style={styles.backButtonText}>
+                ← Zpět na moduly
+              </Text>
+            </Pressable>
+
+            <View style={styles.moduleDetailCard}>
+              <Text style={styles.moduleDetailLabel}>
+                Vybraný modul
+              </Text>
+
+              <Text style={styles.moduleDetailTitle}>
+                {selectedModule.name}
+              </Text>
+
+              <Text style={styles.moduleDetailLanguages}>
+                {selectedModule.source_language}
+                {' → '}
+                {selectedModule.target_language}
+              </Text>
+
+              <View style={styles.moduleStatistics}>
+                <View style={styles.statisticItem}>
+                  <Text style={styles.statisticValue}>
+                    {words.length}
+                  </Text>
+
+                  <Text style={styles.statisticLabel}>
+                    Celkem slov
+                  </Text>
+                </View>
+
+                <View style={styles.statisticItem}>
+                  <Text style={styles.statisticValue}>
+                    {knownWordsCount}
+                  </Text>
+
+                  <Text style={styles.statisticLabel}>
+                    Známých
+                  </Text>
+                </View>
+
+                <View style={styles.statisticItem}>
+                  <Text style={styles.statisticValue}>
+                    {words.length - knownWordsCount}
+                  </Text>
+
+                  <Text style={styles.statisticLabel}>
+                    Neznámých
+                  </Text>
+                </View>
+              </View>
+            </View>
+
+            <View style={styles.wordsHeader}>
+              <View style={styles.wordsTitleContainer}>
+                <Text style={styles.sectionTitle}>
+                  Slovíčka
+                </Text>
+
+                <Text style={styles.sectionSubtitle}>
+                  Přidejte slovíčka a jejich překlady.
+                </Text>
+              </View>
+
+              <Pressable
+                style={({ pressed }) => [
+                  styles.createButton,
+                  pressed && styles.buttonPressed,
+                  isCreateWordFormOpen &&
+                    styles.disabledButton,
+                ]}
+                onPress={handleOpenCreateWordForm}
+                disabled={isCreateWordFormOpen}
+              >
+                <Text style={styles.createButtonText}>
+                  Přidat slovíčko
+                </Text>
+              </Pressable>
+            </View>
+
+            {isCreateWordFormOpen && (
+              <View style={styles.formCard}>
+                <Text style={styles.formCardTitle}>
+                  Nové slovíčko
+                </Text>
+
+                <Text style={styles.formCardDescription}>
+                  Zadejte slovíčko a jeho překlad.
+                </Text>
+
+                <View style={styles.formCardFields}>
+                  <View style={styles.wordsFormRow}>
+                    <View style={styles.wordFormField}>
+                      <Text style={styles.label}>
+                        Slovíčko ({selectedModule.source_language})
+                      </Text>
+
+                      <TextInput
+                        style={styles.input}
+                        value={newWord}
+                        onChangeText={setNewWord}
+                        placeholder="Například house"
+                        editable={!isCreatingWord}
+                        maxLength={255}
+                        autoCapitalize="none"
+                      />
+                    </View>
+
+                    <View style={styles.wordFormField}>
+                      <Text style={styles.label}>
+                        Překlad ({selectedModule.target_language})
+                      </Text>
+
+                      <TextInput
+                        style={styles.input}
+                        value={newTranslation}
+                        onChangeText={setNewTranslation}
+                        placeholder="Například dům"
+                        editable={!isCreatingWord}
+                        maxLength={255}
+                        onSubmitEditing={handleCreateWord}
+                      />
+                    </View>
+                  </View>
+                </View>
+
+                <View style={styles.formButtons}>
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.cancelButton,
+                      pressed && styles.buttonPressed,
+                    ]}
+                    onPress={handleCancelCreateWord}
+                    disabled={isCreatingWord}
+                  >
+                    <Text style={styles.cancelButtonText}>
+                      Zrušit
+                    </Text>
+                  </Pressable>
+
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.submitButton,
+                      pressed && styles.buttonPressed,
+                      isCreatingWord &&
+                        styles.disabledButton,
+                    ]}
+                    onPress={handleCreateWord}
+                    disabled={isCreatingWord}
+                  >
+                    {isCreatingWord ? (
+                      <ActivityIndicator color="#ffffff" />
+                    ) : (
+                      <Text style={styles.submitButtonText}>
+                        Přidat
+                      </Text>
+                    )}
+                  </Pressable>
+                </View>
+              </View>
+            )}
+
+            {wordsMessage !== '' && (
+              <Text
+                style={[
+                  styles.wordsMessage,
+                  isWordsMessageError
+                    ? styles.errorMessage
+                    : styles.successMessage,
+                ]}
+              >
+                {wordsMessage}
+              </Text>
+            )}
+
+            {isWordsLoading ? (
+              <View style={styles.modulesLoading}>
+                <ActivityIndicator
+                  size="large"
+                  color="#4967e8"
+                />
+
+                <Text style={styles.loadingText}>
+                  Načítání slovíček...
+                </Text>
+              </View>
+            ) : words.length === 0 ? (
+              <View style={styles.emptyCard}>
+                <Text style={styles.emptyIcon}>
+                  A–Z
+                </Text>
+
+                <Text style={styles.emptyTitle}>
+                  Modul zatím nemá žádná slovíčka
+                </Text>
+
+                <Text style={styles.emptyText}>
+                  Přidejte první slovíčko a jeho překlad.
+                </Text>
+
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.emptyButton,
+                    pressed && styles.buttonPressed,
+                  ]}
+                  onPress={handleOpenCreateWordForm}
+                  disabled={isCreateWordFormOpen}
+                >
+                  <Text style={styles.emptyButtonText}>
+                    Přidat první slovíčko
+                  </Text>
+                </Pressable>
+              </View>
+            ) : (
+              <View style={styles.wordsList}>
+                {words.map((wordCard) => (
+                  <View
+                    key={wordCard.id}
+                    style={styles.wordCard}
+                  >
+                    <View style={styles.wordInformation}>
+                      <Text style={styles.wordText}>
+                        {wordCard.word}
+                      </Text>
+
+                      <Text style={styles.translationText}>
+                        {wordCard.translation}
+                      </Text>
+                    </View>
+
+                    <View
+                      style={[
+                        styles.statusBadge,
+                        wordCard.is_known
+                          ? styles.knownBadge
+                          : styles.unknownBadge,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.statusBadgeText,
+                          wordCard.is_known
+                            ? styles.knownBadgeText
+                            : styles.unknownBadgeText,
+                        ]}
+                      >
+                        {wordCard.is_known
+                          ? 'Známé'
+                          : 'Neznámé'}
+                      </Text>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+        </ScrollView>
       </SafeAreaView>
     );
   }
@@ -850,9 +1389,7 @@ export default function App() {
                         placeholder="Například Czech"
                         editable={!isCreatingModule}
                         maxLength={50}
-                        onSubmitEditing={
-                          handleCreateModule
-                        }
+                        onSubmitEditing={handleCreateModule}
                       />
                     </View>
                   </View>
@@ -930,9 +1467,7 @@ export default function App() {
                       <TextInput
                         style={styles.input}
                         value={editSourceLanguage}
-                        onChangeText={
-                          setEditSourceLanguage
-                        }
+                        onChangeText={setEditSourceLanguage}
                         placeholder="Výchozí jazyk"
                         editable={!isUpdatingModule}
                         maxLength={50}
@@ -947,15 +1482,11 @@ export default function App() {
                       <TextInput
                         style={styles.input}
                         value={editTargetLanguage}
-                        onChangeText={
-                          setEditTargetLanguage
-                        }
+                        onChangeText={setEditTargetLanguage}
                         placeholder="Cílový jazyk"
                         editable={!isUpdatingModule}
                         maxLength={50}
-                        onSubmitEditing={
-                          handleUpdateModule
-                        }
+                        onSubmitEditing={handleUpdateModule}
                       />
                     </View>
                   </View>
@@ -1066,9 +1597,7 @@ export default function App() {
                           styles.activeModuleCard,
                       ]}
                     >
-                      <View
-                        style={styles.moduleInformation}
-                      >
+                      <View style={styles.moduleInformation}>
                         <Text style={styles.moduleName}>
                           {module.name}
                         </Text>
@@ -1087,17 +1616,15 @@ export default function App() {
                             pressed &&
                               styles.buttonPressed,
                           ]}
-                          onPress={() =>
-                            handleOpenModule(module)
-                          }
+                          onPress={() => {
+                            void handleOpenModule(module);
+                          }}
                           disabled={
                             isDeleting ||
                             isUpdatingModule
                           }
                         >
-                          <Text
-                            style={styles.openButtonText}
-                          >
+                          <Text style={styles.openButtonText}>
                             Otevřít
                           </Text>
                         </Pressable>
@@ -1119,9 +1646,7 @@ export default function App() {
                             isEditing
                           }
                         >
-                          <Text
-                            style={styles.editButtonText}
-                          >
+                          <Text style={styles.editButtonText}>
                             Upravit
                           </Text>
                         </Pressable>
@@ -1134,9 +1659,9 @@ export default function App() {
                             isDeleting &&
                               styles.disabledButton,
                           ]}
-                          onPress={() =>
-                            handleDeleteModule(module)
-                          }
+                          onPress={() => {
+                            void handleDeleteModule(module);
+                          }}
                           disabled={
                             isDeleting ||
                             isUpdatingModule
@@ -1149,9 +1674,7 @@ export default function App() {
                             />
                           ) : (
                             <Text
-                              style={
-                                styles.deleteButtonText
-                              }
+                              style={styles.deleteButtonText}
                             >
                               Smazat
                             </Text>
@@ -1513,6 +2036,19 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
 
+  wordsHeader: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 36,
+  },
+
+  wordsTitleContainer: {
+    marginRight: 20,
+    marginBottom: 16,
+  },
+
   sectionTitle: {
     color: '#202535',
     fontSize: 24,
@@ -1582,6 +2118,20 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
 
+  wordsFormRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+
+  wordFormField: {
+    width: '48%',
+    minWidth: 240,
+    flexGrow: 1,
+    marginRight: 12,
+    marginBottom: 4,
+  },
+
   formButtons: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -1626,6 +2176,13 @@ const styles = StyleSheet.create({
   },
 
   modulesMessage: {
+    marginBottom: 18,
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: 'center',
+  },
+
+  wordsMessage: {
     marginBottom: 18,
     fontSize: 14,
     lineHeight: 20,
@@ -1783,5 +2340,141 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 15,
     fontWeight: '700',
+  },
+
+  backButton: {
+    alignSelf: 'flex-start',
+    minHeight: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 18,
+    paddingHorizontal: 16,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#dce0eb',
+    borderRadius: 10,
+  },
+
+  backButtonText: {
+    color: '#4967e8',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+
+  moduleDetailCard: {
+    padding: 28,
+    backgroundColor: '#4967e8',
+    borderRadius: 20,
+  },
+
+  moduleDetailLabel: {
+    color: '#dfe5ff',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+
+  moduleDetailTitle: {
+    marginTop: 8,
+    color: '#ffffff',
+    fontSize: 30,
+    fontWeight: '800',
+  },
+
+  moduleDetailLanguages: {
+    marginTop: 8,
+    color: '#e9edff',
+    fontSize: 16,
+  },
+
+  moduleStatistics: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginTop: 28,
+  },
+
+  statisticItem: {
+    minWidth: 110,
+    marginRight: 32,
+    marginBottom: 10,
+  },
+
+  statisticValue: {
+    color: '#ffffff',
+    fontSize: 24,
+    fontWeight: '800',
+  },
+
+  statisticLabel: {
+    marginTop: 4,
+    color: '#dfe5ff',
+    fontSize: 13,
+  },
+
+  wordsList: {
+    marginTop: 8,
+  },
+
+  wordCard: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 14,
+    padding: 22,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#e7eaf2',
+    borderRadius: 16,
+  },
+
+  wordInformation: {
+    flexGrow: 1,
+    marginRight: 20,
+    marginBottom: 8,
+  },
+
+  wordText: {
+    color: '#202535',
+    fontSize: 19,
+    fontWeight: '800',
+  },
+
+  translationText: {
+    marginTop: 7,
+    color: '#6f7688',
+    fontSize: 16,
+  },
+
+  statusBadge: {
+    minHeight: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 14,
+    borderRadius: 17,
+  },
+
+  statusBadgeText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+
+  knownBadge: {
+    backgroundColor: '#e7f7ed',
+    borderWidth: 1,
+    borderColor: '#b9e4c8',
+  },
+
+  knownBadgeText: {
+    color: '#27864a',
+  },
+
+  unknownBadge: {
+    backgroundColor: '#fff4e5',
+    borderWidth: 1,
+    borderColor: '#f2d4a8',
+  },
+
+  unknownBadgeText: {
+    color: '#9a661f',
   },
 });
