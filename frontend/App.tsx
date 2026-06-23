@@ -39,6 +39,12 @@ type VocabularyModule = {
   created_at: string;
 };
 
+type ModuleCreateData = {
+  name: string;
+  source_language: string;
+  target_language: string;
+};
+
 const API_URL = (
   process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8000'
 ).replace(/\/$/, '');
@@ -91,7 +97,9 @@ async function getCurrentUser(token: string): Promise<User | null> {
   return (await response.json()) as User;
 }
 
-async function getModules(token: string): Promise<VocabularyModule[]> {
+async function getModules(
+  token: string,
+): Promise<VocabularyModule[]> {
   const response = await fetch(`${API_URL}/modules`, {
     method: 'GET',
     headers: {
@@ -107,21 +115,61 @@ async function getModules(token: string): Promise<VocabularyModule[]> {
   return (await response.json()) as VocabularyModule[];
 }
 
+async function createModule(
+  token: string,
+  moduleData: ModuleCreateData,
+): Promise<VocabularyModule> {
+  const response = await fetch(`${API_URL}/modules`, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(moduleData),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Server vrátil chybu ${response.status}.`);
+  }
+
+  return (await response.json()) as VocabularyModule;
+}
+
 export default function App() {
   const [login, setLogin] = useState('');
   const [password, setPassword] = useState('');
 
-  const [accessToken, setAccessToken] = useState<string | null>(null);
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [accessToken, setAccessToken] = useState<string | null>(
+    null,
+  );
+
+  const [currentUser, setCurrentUser] = useState<User | null>(
+    null,
+  );
+
   const [modules, setModules] = useState<VocabularyModule[]>([]);
 
   const [message, setMessage] = useState('');
   const [modulesMessage, setModulesMessage] = useState('');
+
   const [isError, setIsError] = useState(false);
+  const [isModulesMessageError, setIsModulesMessageError] =
+    useState(false);
 
   const [isLoading, setIsLoading] = useState(false);
   const [isInitializing, setIsInitializing] = useState(true);
   const [isModulesLoading, setIsModulesLoading] = useState(false);
+
+  const [isCreateFormOpen, setIsCreateFormOpen] =
+    useState(false);
+
+  const [moduleName, setModuleName] = useState('');
+  const [sourceLanguage, setSourceLanguage] = useState('');
+  const [targetLanguage, setTargetLanguage] = useState('');
+
+  const [isCreatingModule, setIsCreatingModule] =
+    useState(false);
 
   useEffect(() => {
     const restoreSession = async () => {
@@ -141,7 +189,6 @@ export default function App() {
 
         setAccessToken(storedToken);
         setCurrentUser(user);
-
         setIsModulesLoading(true);
 
         try {
@@ -149,12 +196,20 @@ export default function App() {
           setModules(userModules);
         } catch (error) {
           console.error('Chyba při načítání modulů:', error);
-          setModulesMessage('Moduly se nepodařilo načíst.');
+
+          setModulesMessage(
+            'Moduly se nepodařilo načíst.',
+          );
+          setIsModulesMessageError(true);
         } finally {
           setIsModulesLoading(false);
         }
       } catch (error) {
-        console.error('Chyba při obnovení přihlášení:', error);
+        console.error(
+          'Chyba při obnovení přihlášení:',
+          error,
+        );
+
         await deleteToken();
       } finally {
         setIsInitializing(false);
@@ -168,7 +223,9 @@ export default function App() {
     const normalizedLogin = login.trim();
 
     if (!normalizedLogin || !password) {
-      setMessage('Vyplňte uživatelské jméno a heslo.');
+      setMessage(
+        'Vyplňte uživatelské jméno a heslo.',
+      );
       setIsError(true);
       return;
     }
@@ -212,12 +269,16 @@ export default function App() {
       const loginData = data as LoginResponse;
 
       if (!loginData.access_token) {
-        setMessage('Server nevrátil přístupový token.');
+        setMessage(
+          'Server nevrátil přístupový token.',
+        );
         setIsError(true);
         return;
       }
 
-      const user = await getCurrentUser(loginData.access_token);
+      const user = await getCurrentUser(
+        loginData.access_token,
+      );
 
       if (!user) {
         setMessage(
@@ -238,11 +299,21 @@ export default function App() {
       setModulesMessage('');
 
       try {
-        const userModules = await getModules(loginData.access_token);
+        const userModules = await getModules(
+          loginData.access_token,
+        );
+
         setModules(userModules);
       } catch (error) {
-        console.error('Chyba při načítání modulů:', error);
-        setModulesMessage('Moduly se nepodařilo načíst.');
+        console.error(
+          'Chyba při načítání modulů:',
+          error,
+        );
+
+        setModulesMessage(
+          'Moduly se nepodařilo načíst.',
+        );
+        setIsModulesMessageError(true);
       } finally {
         setIsModulesLoading(false);
       }
@@ -272,31 +343,139 @@ export default function App() {
       setPassword('');
       setMessage('');
       setModulesMessage('');
+
+      setModuleName('');
+      setSourceLanguage('');
+      setTargetLanguage('');
+
+      setIsCreateFormOpen(false);
       setIsError(false);
+      setIsModulesMessageError(false);
     } catch (error) {
       console.error('Chyba při odhlašování:', error);
-      setModulesMessage('Odhlášení se nezdařilo.');
+
+      setModulesMessage(
+        'Odhlášení se nezdařilo.',
+      );
+      setIsModulesMessageError(true);
     } finally {
       setIsLoading(false);
     }
   };
 
   const handleRegister = () => {
-    setMessage('Registrační stránku přidáme v dalším kroku.');
+    setMessage(
+      'Registrační stránku přidáme v dalším kroku.',
+    );
     setIsError(false);
   };
 
-  const handleCreateModule = () => {
+  const handleOpenCreateForm = () => {
+    setIsCreateFormOpen(true);
+    setModulesMessage('');
+    setIsModulesMessageError(false);
+  };
+
+  const handleCancelCreate = () => {
+    setIsCreateFormOpen(false);
+
+    setModuleName('');
+    setSourceLanguage('');
+    setTargetLanguage('');
+
+    setModulesMessage('');
+    setIsModulesMessageError(false);
+  };
+
+  const handleCreateModule = async () => {
+    if (!accessToken) {
+      setModulesMessage(
+        'Pro vytvoření modulu se musíte přihlásit.',
+      );
+      setIsModulesMessageError(true);
+      return;
+    }
+
+    const normalizedName = moduleName.trim();
+    const normalizedSourceLanguage =
+      sourceLanguage.trim();
+    const normalizedTargetLanguage =
+      targetLanguage.trim();
+
+    if (
+      !normalizedName ||
+      !normalizedSourceLanguage ||
+      !normalizedTargetLanguage
+    ) {
+      setModulesMessage(
+        'Vyplňte název modulu a oba jazyky.',
+      );
+      setIsModulesMessageError(true);
+      return;
+    }
+
+    setIsCreatingModule(true);
+    setModulesMessage('');
+    setIsModulesMessageError(false);
+
+    try {
+      const newModule = await createModule(
+        accessToken,
+        {
+          name: normalizedName,
+          source_language: normalizedSourceLanguage,
+          target_language: normalizedTargetLanguage,
+        },
+      );
+
+      setModules((currentModules) => [
+        newModule,
+        ...currentModules,
+      ]);
+
+      setModuleName('');
+      setSourceLanguage('');
+      setTargetLanguage('');
+
+      setIsCreateFormOpen(false);
+
+      setModulesMessage(
+        'Modul byl úspěšně vytvořen.',
+      );
+      setIsModulesMessageError(false);
+    } catch (error) {
+      console.error(
+        'Chyba při vytváření modulu:',
+        error,
+      );
+
+      setModulesMessage(
+        'Modul se nepodařilo vytvořit.',
+      );
+      setIsModulesMessageError(true);
+    } finally {
+      setIsCreatingModule(false);
+    }
+  };
+
+  const handleOpenModule = (
+    module: VocabularyModule,
+  ) => {
     setModulesMessage(
-      'Formulář pro vytvoření modulu přidáme v dalším kroku.',
+      `Otevření modulu „${module.name}“ přidáme později.`,
     );
+
+    setIsModulesMessageError(false);
   };
 
   if (isInitializing) {
     return (
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.loadingPage}>
-          <ActivityIndicator size="large" color="#4967e8" />
+          <ActivityIndicator
+            size="large"
+            color="#4967e8"
+          />
 
           <Text style={styles.loadingText}>
             Načítání aplikace...
@@ -309,10 +488,15 @@ export default function App() {
   if (accessToken && currentUser) {
     return (
       <SafeAreaView style={styles.safeArea}>
-        <ScrollView contentContainerStyle={styles.homePage}>
+        <ScrollView
+          contentContainerStyle={styles.homePage}
+          keyboardShouldPersistTaps="handled"
+        >
           <View style={styles.homeContainer}>
             <View style={styles.header}>
-              <Text style={styles.homeLogo}>My Words</Text>
+              <Text style={styles.homeLogo}>
+                My Words
+              </Text>
 
               <Pressable
                 style={({ pressed }) => [
@@ -362,8 +546,11 @@ export default function App() {
                 style={({ pressed }) => [
                   styles.createButton,
                   pressed && styles.buttonPressed,
+                  isCreateFormOpen &&
+                    styles.disabledButton,
                 ]}
-                onPress={handleCreateModule}
+                onPress={handleOpenCreateForm}
+                disabled={isCreateFormOpen}
               >
                 <Text style={styles.createButtonText}>
                   Vytvořit modul
@@ -371,8 +558,114 @@ export default function App() {
               </Pressable>
             </View>
 
+            {isCreateFormOpen && (
+              <View style={styles.createFormCard}>
+                <Text style={styles.createFormTitle}>
+                  Nový modul
+                </Text>
+
+                <Text style={styles.createFormDescription}>
+                  Zadejte název modulu a jazykovou
+                  kombinaci.
+                </Text>
+
+                <View style={styles.createFormFields}>
+                  <View style={styles.field}>
+                    <Text style={styles.label}>
+                      Název modulu
+                    </Text>
+
+                    <TextInput
+                      style={styles.input}
+                      value={moduleName}
+                      onChangeText={setModuleName}
+                      placeholder="Například Lecture 2"
+                      editable={!isCreatingModule}
+                      maxLength={100}
+                    />
+                  </View>
+
+                  <View style={styles.languagesRow}>
+                    <View style={styles.languageField}>
+                      <Text style={styles.label}>
+                        Výchozí jazyk
+                      </Text>
+
+                      <TextInput
+                        style={styles.input}
+                        value={sourceLanguage}
+                        onChangeText={setSourceLanguage}
+                        placeholder="Například English"
+                        editable={!isCreatingModule}
+                        maxLength={50}
+                      />
+                    </View>
+
+                    <View style={styles.languageField}>
+                      <Text style={styles.label}>
+                        Cílový jazyk
+                      </Text>
+
+                      <TextInput
+                        style={styles.input}
+                        value={targetLanguage}
+                        onChangeText={setTargetLanguage}
+                        placeholder="Například Czech"
+                        editable={!isCreatingModule}
+                        maxLength={50}
+                        onSubmitEditing={
+                          handleCreateModule
+                        }
+                      />
+                    </View>
+                  </View>
+                </View>
+
+                <View style={styles.createFormButtons}>
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.cancelButton,
+                      pressed && styles.buttonPressed,
+                    ]}
+                    onPress={handleCancelCreate}
+                    disabled={isCreatingModule}
+                  >
+                    <Text style={styles.cancelButtonText}>
+                      Zrušit
+                    </Text>
+                  </Pressable>
+
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.submitButton,
+                      pressed && styles.buttonPressed,
+                      isCreatingModule &&
+                        styles.disabledButton,
+                    ]}
+                    onPress={handleCreateModule}
+                    disabled={isCreatingModule}
+                  >
+                    {isCreatingModule ? (
+                      <ActivityIndicator color="#ffffff" />
+                    ) : (
+                      <Text style={styles.submitButtonText}>
+                        Vytvořit
+                      </Text>
+                    )}
+                  </Pressable>
+                </View>
+              </View>
+            )}
+
             {modulesMessage !== '' && (
-              <Text style={styles.modulesMessage}>
+              <Text
+                style={[
+                  styles.modulesMessage,
+                  isModulesMessageError
+                    ? styles.errorMessage
+                    : styles.successMessage,
+                ]}
+              >
                 {modulesMessage}
               </Text>
             )}
@@ -390,15 +683,17 @@ export default function App() {
               </View>
             ) : modules.length === 0 ? (
               <View style={styles.emptyCard}>
-                <Text style={styles.emptyIcon}>A–Z</Text>
+                <Text style={styles.emptyIcon}>
+                  A–Z
+                </Text>
 
                 <Text style={styles.emptyTitle}>
                   Zatím nemáte žádné moduly
                 </Text>
 
                 <Text style={styles.emptyText}>
-                  Vytvořte svůj první modul a přidejte do něj
-                  slovíčka a překlady.
+                  Vytvořte svůj první modul a přidejte do
+                  něj slovíčka a překlady.
                 </Text>
 
                 <Pressable
@@ -406,7 +701,7 @@ export default function App() {
                     styles.emptyButton,
                     pressed && styles.buttonPressed,
                   ]}
-                  onPress={handleCreateModule}
+                  onPress={handleOpenCreateForm}
                 >
                   <Text style={styles.emptyButtonText}>
                     Vytvořit první modul
@@ -420,7 +715,9 @@ export default function App() {
                     key={module.id}
                     style={styles.moduleCard}
                   >
-                    <View style={styles.moduleInformation}>
+                    <View
+                      style={styles.moduleInformation}
+                    >
                       <Text style={styles.moduleName}>
                         {module.name}
                       </Text>
@@ -438,9 +735,7 @@ export default function App() {
                         pressed && styles.buttonPressed,
                       ]}
                       onPress={() =>
-                        setModulesMessage(
-                          `Otevření modulu „${module.name}“ přidáme později.`,
-                        )
+                        handleOpenModule(module)
                       }
                     >
                       <Text style={styles.openButtonText}>
@@ -461,17 +756,25 @@ export default function App() {
     <SafeAreaView style={styles.safeArea}>
       <KeyboardAvoidingView
         style={styles.keyboardContainer}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={
+          Platform.OS === 'ios'
+            ? 'padding'
+            : undefined
+        }
       >
         <View style={styles.loginPage}>
           <View style={styles.loginCard}>
-            <Text style={styles.logo}>My Words</Text>
+            <Text style={styles.logo}>
+              My Words
+            </Text>
 
-            <Text style={styles.title}>Vítejte</Text>
+            <Text style={styles.title}>
+              Vítejte
+            </Text>
 
             <Text style={styles.subtitle}>
-              Přihlaste se ke svému účtu a pokračujte ve studiu
-              slovíček.
+              Přihlaste se ke svému účtu a pokračujte ve
+              studiu slovíček.
             </Text>
 
             <View style={styles.form}>
@@ -493,7 +796,9 @@ export default function App() {
               </View>
 
               <View style={styles.field}>
-                <Text style={styles.label}>Heslo</Text>
+                <Text style={styles.label}>
+                  Heslo
+                </Text>
 
                 <TextInput
                   style={styles.input}
@@ -662,6 +967,10 @@ const styles = StyleSheet.create({
     color: '#c83e4d',
   },
 
+  successMessage: {
+    color: '#27864a',
+  },
+
   informationMessage: {
     color: '#4967e8',
   },
@@ -816,10 +1125,93 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 
-  modulesMessage: {
-    marginBottom: 18,
+  createFormCard: {
+    marginBottom: 22,
+    padding: 24,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#e7eaf2',
+    borderRadius: 18,
+  },
+
+  createFormTitle: {
+    color: '#202535',
+    fontSize: 21,
+    fontWeight: '800',
+  },
+
+  createFormDescription: {
+    marginTop: 7,
     color: '#6f7688',
     fontSize: 14,
+    lineHeight: 21,
+  },
+
+  createFormFields: {
+    marginTop: 24,
+  },
+
+  languagesRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+
+  languageField: {
+    width: '48%',
+    minWidth: 240,
+    flexGrow: 1,
+    marginRight: 12,
+    marginBottom: 4,
+  },
+
+  createFormButtons: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
+    marginTop: 8,
+  },
+
+  cancelButton: {
+    minHeight: 46,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+    marginBottom: 8,
+    paddingHorizontal: 20,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#dce0eb',
+    borderRadius: 11,
+  },
+
+  cancelButtonText: {
+    color: '#6f7688',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+
+  submitButton: {
+    minWidth: 120,
+    minHeight: 46,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+    paddingHorizontal: 20,
+    backgroundColor: '#4967e8',
+    borderRadius: 11,
+  },
+
+  submitButtonText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+
+  modulesMessage: {
+    marginBottom: 18,
+    fontSize: 14,
+    lineHeight: 20,
     textAlign: 'center',
   },
 
@@ -928,4 +1320,3 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 });
-
