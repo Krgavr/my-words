@@ -28,7 +28,17 @@ type LoginResponse = {
 };
 
 type ErrorResponse = {
-  detail?: string;
+  detail?:
+    | string
+    | Array<{
+        msg?: string;
+      }>;
+};
+
+type RegistrationData = {
+  username: string;
+  email: string;
+  password: string;
 };
 
 type VocabularyModule = {
@@ -90,6 +100,47 @@ async function deleteToken(): Promise<void> {
   }
 
   await SecureStore.deleteItemAsync(TOKEN_KEY);
+}
+
+function getErrorDetail(data: ErrorResponse): string | null {
+  if (typeof data.detail === 'string') {
+    return data.detail;
+  }
+
+  if (Array.isArray(data.detail)) {
+    const firstMessage = data.detail.find(
+      (errorItem) => typeof errorItem.msg === 'string',
+    )?.msg;
+
+    return firstMessage ?? null;
+  }
+
+  return null;
+}
+
+async function registerUserRequest(
+  registrationData: RegistrationData,
+): Promise<User> {
+  const response = await fetch(`${API_URL}/auth/register`, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(registrationData),
+  });
+
+  const data = (await response.json()) as User | ErrorResponse;
+
+  if (!response.ok) {
+    const errorDetail = getErrorDetail(data as ErrorResponse);
+
+    throw new Error(
+      errorDetail ?? `Server vrátil chybu ${response.status}.`,
+    );
+  }
+
+  return data as User;
 }
 
 async function getCurrentUser(token: string): Promise<User | null> {
@@ -391,6 +442,13 @@ async function confirmWordDeletion(
 export default function App() {
   const [login, setLogin] = useState('');
   const [password, setPassword] = useState('');
+
+  const [isRegisterMode, setIsRegisterMode] = useState(false);
+  const [registerUsername, setRegisterUsername] = useState('');
+  const [registerEmail, setRegisterEmail] = useState('');
+  const [registerPassword, setRegisterPassword] = useState('');
+  const [registerPasswordConfirmation, setRegisterPasswordConfirmation] =
+    useState('');
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
 
@@ -610,6 +668,11 @@ export default function App() {
 
       setLogin('');
       setPassword('');
+      setIsRegisterMode(false);
+      setRegisterUsername('');
+      setRegisterEmail('');
+      setRegisterPassword('');
+      setRegisterPasswordConfirmation('');
       setMessage('');
       setModulesMessage('');
       setWordsMessage('');
@@ -654,9 +717,107 @@ export default function App() {
     }
   };
 
-  const handleRegister = () => {
-    setMessage('Registrační stránku přidáme později.');
+  const handleOpenRegistration = () => {
+    const normalizedLogin = login.trim();
+
+    setIsRegisterMode(true);
+    setRegisterUsername(
+      normalizedLogin.includes('@') ? '' : normalizedLogin,
+    );
+    setRegisterEmail(
+      normalizedLogin.includes('@') ? normalizedLogin : '',
+    );
+    setRegisterPassword('');
+    setRegisterPasswordConfirmation('');
+    setMessage('');
     setIsError(false);
+  };
+
+  const handleBackToLogin = () => {
+    setIsRegisterMode(false);
+    setRegisterUsername('');
+    setRegisterEmail('');
+    setRegisterPassword('');
+    setRegisterPasswordConfirmation('');
+    setMessage('');
+    setIsError(false);
+  };
+
+  const handleRegister = async () => {
+    const normalizedUsername = registerUsername.trim();
+    const normalizedEmail = registerEmail.trim().toLowerCase();
+
+    if (
+      !normalizedUsername ||
+      !normalizedEmail ||
+      !registerPassword ||
+      !registerPasswordConfirmation
+    ) {
+      setMessage('Vyplňte všechna registrační pole.');
+      setIsError(true);
+      return;
+    }
+
+    if (normalizedUsername.length < 3) {
+      setMessage(
+        'Uživatelské jméno musí mít alespoň 3 znaky.',
+      );
+      setIsError(true);
+      return;
+    }
+
+    if (!normalizedEmail.includes('@')) {
+      setMessage('Zadejte platnou e-mailovou adresu.');
+      setIsError(true);
+      return;
+    }
+
+    if (registerPassword.length < 6) {
+      setMessage('Heslo musí mít alespoň 6 znaků.');
+      setIsError(true);
+      return;
+    }
+
+    if (registerPassword !== registerPasswordConfirmation) {
+      setMessage('Zadaná hesla se neshodují.');
+      setIsError(true);
+      return;
+    }
+
+    setIsLoading(true);
+    setMessage('');
+    setIsError(false);
+
+    try {
+      await registerUserRequest({
+        username: normalizedUsername,
+        email: normalizedEmail,
+        password: registerPassword,
+      });
+
+      setLogin(normalizedUsername);
+      setPassword('');
+      setIsRegisterMode(false);
+      setRegisterUsername('');
+      setRegisterEmail('');
+      setRegisterPassword('');
+      setRegisterPasswordConfirmation('');
+      setMessage(
+        'Účet byl úspěšně vytvořen. Nyní se přihlaste.',
+      );
+      setIsError(false);
+    } catch (error) {
+      console.error('Chyba při registraci:', error);
+
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : 'Registrace se nezdařila. Zkuste to prosím znovu.',
+      );
+      setIsError(true);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleOpenCreateForm = () => {
@@ -2414,46 +2575,125 @@ export default function App() {
         style={styles.keyboardContainer}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <View style={styles.loginPage}>
+        <ScrollView
+          contentContainerStyle={styles.loginPage}
+          keyboardShouldPersistTaps="handled"
+        >
           <View style={styles.loginCard}>
             <Text style={styles.logo}>My Words</Text>
-            <Text style={styles.title}>Vítejte</Text>
+
+            <Text style={styles.title}>
+              {isRegisterMode ? 'Vytvořit účet' : 'Vítejte'}
+            </Text>
+
             <Text style={styles.subtitle}>
-              Přihlaste se ke svému účtu a pokračujte ve studiu slovíček.
+              {isRegisterMode
+                ? 'Zaregistrujte se a vytvořte si vlastní sady slovíček.'
+                : 'Přihlaste se ke svému účtu a pokračujte ve studiu slovíček.'}
             </Text>
 
             <View style={styles.loginForm}>
-              <View style={styles.field}>
-                <Text style={styles.label}>
-                  Uživatelské jméno nebo e-mail
-                </Text>
-                <TextInput
-                  style={styles.input}
-                  value={login}
-                  onChangeText={setLogin}
-                  placeholder="Například testuser"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  editable={!isLoading}
-                  returnKeyType="next"
-                />
-              </View>
+              {isRegisterMode ? (
+                <>
+                  <View style={styles.field}>
+                    <Text style={styles.label}>Uživatelské jméno</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={registerUsername}
+                      onChangeText={setRegisterUsername}
+                      placeholder="Například kristina"
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      editable={!isLoading}
+                      maxLength={50}
+                      returnKeyType="next"
+                    />
+                  </View>
 
-              <View style={styles.field}>
-                <Text style={styles.label}>Heslo</Text>
-                <TextInput
-                  style={styles.input}
-                  value={password}
-                  onChangeText={setPassword}
-                  placeholder="Zadejte heslo"
-                  secureTextEntry
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  editable={!isLoading}
-                  returnKeyType="done"
-                  onSubmitEditing={handleLogin}
-                />
-              </View>
+                  <View style={styles.field}>
+                    <Text style={styles.label}>E-mail</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={registerEmail}
+                      onChangeText={setRegisterEmail}
+                      placeholder="napriklad@email.cz"
+                      keyboardType="email-address"
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      editable={!isLoading}
+                      maxLength={255}
+                      returnKeyType="next"
+                    />
+                  </View>
+
+                  <View style={styles.field}>
+                    <Text style={styles.label}>Heslo</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={registerPassword}
+                      onChangeText={setRegisterPassword}
+                      placeholder="Alespoň 6 znaků"
+                      secureTextEntry
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      editable={!isLoading}
+                      maxLength={128}
+                      returnKeyType="next"
+                    />
+                  </View>
+
+                  <View style={styles.field}>
+                    <Text style={styles.label}>Potvrzení hesla</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={registerPasswordConfirmation}
+                      onChangeText={setRegisterPasswordConfirmation}
+                      placeholder="Zadejte heslo znovu"
+                      secureTextEntry
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      editable={!isLoading}
+                      maxLength={128}
+                      returnKeyType="done"
+                      onSubmitEditing={handleRegister}
+                    />
+                  </View>
+                </>
+              ) : (
+                <>
+                  <View style={styles.field}>
+                    <Text style={styles.label}>
+                      Uživatelské jméno nebo e-mail
+                    </Text>
+                    <TextInput
+                      style={styles.input}
+                      value={login}
+                      onChangeText={setLogin}
+                      placeholder="Například testuser"
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      editable={!isLoading}
+                      returnKeyType="next"
+                    />
+                  </View>
+
+                  <View style={styles.field}>
+                    <Text style={styles.label}>Heslo</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={password}
+                      onChangeText={setPassword}
+                      placeholder="Zadejte heslo"
+                      secureTextEntry
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      editable={!isLoading}
+                      returnKeyType="done"
+                      onSubmitEditing={handleLogin}
+                    />
+                  </View>
+                </>
+              )}
 
               {message !== '' && (
                 <Text
@@ -2474,25 +2714,45 @@ export default function App() {
                   pressed && styles.buttonPressed,
                   isLoading && styles.disabledButton,
                 ]}
-                onPress={handleLogin}
+                onPress={
+                  isRegisterMode ? handleRegister : handleLogin
+                }
                 disabled={isLoading}
               >
                 {isLoading ? (
                   <ActivityIndicator color="#ffffff" />
                 ) : (
-                  <Text style={styles.loginButtonText}>Přihlásit se</Text>
+                  <Text style={styles.loginButtonText}>
+                    {isRegisterMode
+                      ? 'Zaregistrovat se'
+                      : 'Přihlásit se'}
+                  </Text>
                 )}
               </Pressable>
             </View>
 
             <View style={styles.registerRow}>
-              <Text style={styles.registerText}>Nemáte účet?</Text>
-              <Pressable onPress={handleRegister} disabled={isLoading}>
-                <Text style={styles.registerLink}>Zaregistrovat se</Text>
+              <Text style={styles.registerText}>
+                {isRegisterMode ? 'Už máte účet?' : 'Nemáte účet?'}
+              </Text>
+
+              <Pressable
+                onPress={
+                  isRegisterMode
+                    ? handleBackToLogin
+                    : handleOpenRegistration
+                }
+                disabled={isLoading}
+              >
+                <Text style={styles.registerLink}>
+                  {isRegisterMode
+                    ? 'Přihlásit se'
+                    : 'Zaregistrovat se'}
+                </Text>
               </Pressable>
             </View>
           </View>
-        </View>
+        </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -2521,7 +2781,7 @@ const styles = StyleSheet.create({
   },
 
   loginPage: {
-    flex: 1,
+    flexGrow: 1,
     alignItems: 'center',
     justifyContent: 'center',
     padding: 24,
@@ -2529,7 +2789,7 @@ const styles = StyleSheet.create({
 
   loginCard: {
     width: '100%',
-    maxWidth: 420,
+    maxWidth: 460,
     padding: 32,
     backgroundColor: '#ffffff',
     borderWidth: 1,
