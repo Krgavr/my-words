@@ -40,7 +40,7 @@ type VocabularyModule = {
   created_at: string;
 };
 
-type ModuleCreateData = {
+type ModuleData = {
   name: string;
   source_language: string;
   target_language: string;
@@ -116,12 +116,34 @@ async function getModules(
   return (await response.json()) as VocabularyModule[];
 }
 
-async function createModule(
+async function createModuleRequest(
   token: string,
-  moduleData: ModuleCreateData,
+  moduleData: ModuleData,
 ): Promise<VocabularyModule> {
   const response = await fetch(`${API_URL}/modules`, {
     method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(moduleData),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Server vrátil chybu ${response.status}.`);
+  }
+
+  return (await response.json()) as VocabularyModule;
+}
+
+async function updateModuleRequest(
+  token: string,
+  moduleId: number,
+  moduleData: ModuleData,
+): Promise<VocabularyModule> {
+  const response = await fetch(`${API_URL}/modules/${moduleId}`, {
+    method: 'PUT',
     headers: {
       Accept: 'application/json',
       'Content-Type': 'application/json',
@@ -219,8 +241,20 @@ export default function App() {
   const [moduleName, setModuleName] = useState('');
   const [sourceLanguage, setSourceLanguage] = useState('');
   const [targetLanguage, setTargetLanguage] = useState('');
-
   const [isCreatingModule, setIsCreatingModule] =
+    useState(false);
+
+  const [editingModuleId, setEditingModuleId] = useState<
+    number | null
+  >(null);
+
+  const [editModuleName, setEditModuleName] = useState('');
+  const [editSourceLanguage, setEditSourceLanguage] =
+    useState('');
+  const [editTargetLanguage, setEditTargetLanguage] =
+    useState('');
+
+  const [isUpdatingModule, setIsUpdatingModule] =
     useState(false);
 
   const [deletingModuleId, setDeletingModuleId] = useState<
@@ -393,8 +427,14 @@ export default function App() {
       setSourceLanguage('');
       setTargetLanguage('');
 
+      setEditModuleName('');
+      setEditSourceLanguage('');
+      setEditTargetLanguage('');
+
       setIsCreateFormOpen(false);
+      setEditingModuleId(null);
       setDeletingModuleId(null);
+
       setIsError(false);
       setIsModulesMessageError(false);
     } catch (error) {
@@ -413,6 +453,12 @@ export default function App() {
   };
 
   const handleOpenCreateForm = () => {
+    setEditingModuleId(null);
+
+    setEditModuleName('');
+    setEditSourceLanguage('');
+    setEditTargetLanguage('');
+
     setIsCreateFormOpen(true);
     setModulesMessage('');
     setIsModulesMessageError(false);
@@ -461,11 +507,14 @@ export default function App() {
     setIsModulesMessageError(false);
 
     try {
-      const newModule = await createModule(accessToken, {
-        name: normalizedName,
-        source_language: normalizedSourceLanguage,
-        target_language: normalizedTargetLanguage,
-      });
+      const newModule = await createModuleRequest(
+        accessToken,
+        {
+          name: normalizedName,
+          source_language: normalizedSourceLanguage,
+          target_language: normalizedTargetLanguage,
+        },
+      );
 
       setModules((currentModules) => [
         newModule,
@@ -486,6 +535,106 @@ export default function App() {
       setIsModulesMessageError(true);
     } finally {
       setIsCreatingModule(false);
+    }
+  };
+
+  const handleOpenEditForm = (
+    module: VocabularyModule,
+  ) => {
+    setIsCreateFormOpen(false);
+
+    setModuleName('');
+    setSourceLanguage('');
+    setTargetLanguage('');
+
+    setEditingModuleId(module.id);
+    setEditModuleName(module.name);
+    setEditSourceLanguage(module.source_language);
+    setEditTargetLanguage(module.target_language);
+
+    setModulesMessage('');
+    setIsModulesMessageError(false);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingModuleId(null);
+
+    setEditModuleName('');
+    setEditSourceLanguage('');
+    setEditTargetLanguage('');
+
+    setModulesMessage('');
+    setIsModulesMessageError(false);
+  };
+
+  const handleUpdateModule = async () => {
+    if (!accessToken || editingModuleId === null) {
+      setModulesMessage(
+        'Pro úpravu modulu se musíte přihlásit.',
+      );
+      setIsModulesMessageError(true);
+      return;
+    }
+
+    const normalizedName = editModuleName.trim();
+    const normalizedSourceLanguage =
+      editSourceLanguage.trim();
+    const normalizedTargetLanguage =
+      editTargetLanguage.trim();
+
+    if (
+      !normalizedName ||
+      !normalizedSourceLanguage ||
+      !normalizedTargetLanguage
+    ) {
+      setModulesMessage(
+        'Vyplňte název modulu a oba jazyky.',
+      );
+      setIsModulesMessageError(true);
+      return;
+    }
+
+    setIsUpdatingModule(true);
+    setModulesMessage('');
+    setIsModulesMessageError(false);
+
+    try {
+      const updatedModule = await updateModuleRequest(
+        accessToken,
+        editingModuleId,
+        {
+          name: normalizedName,
+          source_language: normalizedSourceLanguage,
+          target_language: normalizedTargetLanguage,
+        },
+      );
+
+      setModules((currentModules) =>
+        currentModules.map((module) =>
+          module.id === updatedModule.id
+            ? updatedModule
+            : module,
+        ),
+      );
+
+      setEditingModuleId(null);
+      setEditModuleName('');
+      setEditSourceLanguage('');
+      setEditTargetLanguage('');
+
+      setModulesMessage(
+        'Změny modulu byly úspěšně uloženy.',
+      );
+      setIsModulesMessageError(false);
+    } catch (error) {
+      console.error('Chyba při úpravě modulu:', error);
+
+      setModulesMessage(
+        'Změny modulu se nepodařilo uložit.',
+      );
+      setIsModulesMessageError(true);
+    } finally {
+      setIsUpdatingModule(false);
     }
   };
 
@@ -515,16 +664,27 @@ export default function App() {
 
       setModules((currentModules) =>
         currentModules.filter(
-          (currentModule) => currentModule.id !== module.id,
+          (currentModule) =>
+            currentModule.id !== module.id,
         ),
       );
+
+      if (editingModuleId === module.id) {
+        setEditingModuleId(null);
+        setEditModuleName('');
+        setEditSourceLanguage('');
+        setEditTargetLanguage('');
+      }
 
       setModulesMessage(
         `Modul „${module.name}“ byl úspěšně odstraněn.`,
       );
       setIsModulesMessageError(false);
     } catch (error) {
-      console.error('Chyba při odstraňování modulu:', error);
+      console.error(
+        'Chyba při odstraňování modulu:',
+        error,
+      );
 
       setModulesMessage(
         `Modul „${module.name}“ se nepodařilo odstranit.`,
@@ -636,16 +796,17 @@ export default function App() {
             </View>
 
             {isCreateFormOpen && (
-              <View style={styles.createFormCard}>
-                <Text style={styles.createFormTitle}>
+              <View style={styles.formCard}>
+                <Text style={styles.formCardTitle}>
                   Nový modul
                 </Text>
 
-                <Text style={styles.createFormDescription}>
-                  Zadejte název modulu a jazykovou kombinaci.
+                <Text style={styles.formCardDescription}>
+                  Zadejte název modulu a jazykovou
+                  kombinaci.
                 </Text>
 
-                <View style={styles.createFormFields}>
+                <View style={styles.formCardFields}>
                   <View style={styles.field}>
                     <Text style={styles.label}>
                       Název modulu
@@ -697,7 +858,7 @@ export default function App() {
                   </View>
                 </View>
 
-                <View style={styles.createFormButtons}>
+                <View style={styles.formButtons}>
                   <Pressable
                     style={({ pressed }) => [
                       styles.cancelButton,
@@ -726,6 +887,109 @@ export default function App() {
                     ) : (
                       <Text style={styles.submitButtonText}>
                         Vytvořit
+                      </Text>
+                    )}
+                  </Pressable>
+                </View>
+              </View>
+            )}
+
+            {editingModuleId !== null && (
+              <View style={styles.formCard}>
+                <Text style={styles.formCardTitle}>
+                  Upravit modul
+                </Text>
+
+                <Text style={styles.formCardDescription}>
+                  Změňte název modulu nebo jazykovou
+                  kombinaci.
+                </Text>
+
+                <View style={styles.formCardFields}>
+                  <View style={styles.field}>
+                    <Text style={styles.label}>
+                      Název modulu
+                    </Text>
+
+                    <TextInput
+                      style={styles.input}
+                      value={editModuleName}
+                      onChangeText={setEditModuleName}
+                      placeholder="Název modulu"
+                      editable={!isUpdatingModule}
+                      maxLength={100}
+                    />
+                  </View>
+
+                  <View style={styles.languagesRow}>
+                    <View style={styles.languageField}>
+                      <Text style={styles.label}>
+                        Výchozí jazyk
+                      </Text>
+
+                      <TextInput
+                        style={styles.input}
+                        value={editSourceLanguage}
+                        onChangeText={
+                          setEditSourceLanguage
+                        }
+                        placeholder="Výchozí jazyk"
+                        editable={!isUpdatingModule}
+                        maxLength={50}
+                      />
+                    </View>
+
+                    <View style={styles.languageField}>
+                      <Text style={styles.label}>
+                        Cílový jazyk
+                      </Text>
+
+                      <TextInput
+                        style={styles.input}
+                        value={editTargetLanguage}
+                        onChangeText={
+                          setEditTargetLanguage
+                        }
+                        placeholder="Cílový jazyk"
+                        editable={!isUpdatingModule}
+                        maxLength={50}
+                        onSubmitEditing={
+                          handleUpdateModule
+                        }
+                      />
+                    </View>
+                  </View>
+                </View>
+
+                <View style={styles.formButtons}>
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.cancelButton,
+                      pressed && styles.buttonPressed,
+                    ]}
+                    onPress={handleCancelEdit}
+                    disabled={isUpdatingModule}
+                  >
+                    <Text style={styles.cancelButtonText}>
+                      Zrušit
+                    </Text>
+                  </Pressable>
+
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.submitButton,
+                      pressed && styles.buttonPressed,
+                      isUpdatingModule &&
+                        styles.disabledButton,
+                    ]}
+                    onPress={handleUpdateModule}
+                    disabled={isUpdatingModule}
+                  >
+                    {isUpdatingModule ? (
+                      <ActivityIndicator color="#ffffff" />
+                    ) : (
+                      <Text style={styles.submitButtonText}>
+                        Uložit změny
                       </Text>
                     )}
                   </Pressable>
@@ -790,10 +1054,17 @@ export default function App() {
                   const isDeleting =
                     deletingModuleId === module.id;
 
+                  const isEditing =
+                    editingModuleId === module.id;
+
                   return (
                     <View
                       key={module.id}
-                      style={styles.moduleCard}
+                      style={[
+                        styles.moduleCard,
+                        isEditing &&
+                          styles.activeModuleCard,
+                      ]}
                     >
                       <View
                         style={styles.moduleInformation}
@@ -819,12 +1090,39 @@ export default function App() {
                           onPress={() =>
                             handleOpenModule(module)
                           }
-                          disabled={isDeleting}
+                          disabled={
+                            isDeleting ||
+                            isUpdatingModule
+                          }
                         >
                           <Text
                             style={styles.openButtonText}
                           >
                             Otevřít
+                          </Text>
+                        </Pressable>
+
+                        <Pressable
+                          style={({ pressed }) => [
+                            styles.editButton,
+                            pressed &&
+                              styles.buttonPressed,
+                            isEditing &&
+                              styles.disabledButton,
+                          ]}
+                          onPress={() =>
+                            handleOpenEditForm(module)
+                          }
+                          disabled={
+                            isDeleting ||
+                            isUpdatingModule ||
+                            isEditing
+                          }
+                        >
+                          <Text
+                            style={styles.editButtonText}
+                          >
+                            Upravit
                           </Text>
                         </Pressable>
 
@@ -839,7 +1137,10 @@ export default function App() {
                           onPress={() =>
                             handleDeleteModule(module)
                           }
-                          disabled={isDeleting}
+                          disabled={
+                            isDeleting ||
+                            isUpdatingModule
+                          }
                         >
                           {isDeleting ? (
                             <ActivityIndicator
@@ -848,7 +1149,9 @@ export default function App() {
                             />
                           ) : (
                             <Text
-                              style={styles.deleteButtonText}
+                              style={
+                                styles.deleteButtonText
+                              }
                             >
                               Smazat
                             </Text>
@@ -891,7 +1194,7 @@ export default function App() {
               studiu slovíček.
             </Text>
 
-            <View style={styles.form}>
+            <View style={styles.loginForm}>
               <View style={styles.field}>
                 <Text style={styles.label}>
                   Uživatelské jméno nebo e-mail
@@ -1043,7 +1346,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 
-  form: {
+  loginForm: {
     marginTop: 32,
   },
 
@@ -1239,7 +1542,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 
-  createFormCard: {
+  formCard: {
     marginBottom: 22,
     padding: 24,
     backgroundColor: '#ffffff',
@@ -1248,20 +1551,20 @@ const styles = StyleSheet.create({
     borderRadius: 18,
   },
 
-  createFormTitle: {
+  formCardTitle: {
     color: '#202535',
     fontSize: 21,
     fontWeight: '800',
   },
 
-  createFormDescription: {
+  formCardDescription: {
     marginTop: 7,
     color: '#6f7688',
     fontSize: 14,
     lineHeight: 21,
   },
 
-  createFormFields: {
+  formCardFields: {
     marginTop: 24,
   },
 
@@ -1279,7 +1582,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
 
-  createFormButtons: {
+  formButtons: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'flex-end',
@@ -1306,7 +1609,7 @@ const styles = StyleSheet.create({
   },
 
   submitButton: {
-    minWidth: 120,
+    minWidth: 140,
     minHeight: 46,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1352,6 +1655,10 @@ const styles = StyleSheet.create({
     borderRadius: 16,
   },
 
+  activeModuleCard: {
+    borderColor: '#4967e8',
+  },
+
   moduleInformation: {
     flexGrow: 1,
     marginRight: 20,
@@ -1381,13 +1688,31 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 10,
-    paddingHorizontal: 18,
+    paddingHorizontal: 16,
     backgroundColor: '#eef1ff',
     borderRadius: 10,
   },
 
   openButtonText: {
     color: '#4967e8',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+
+  editButton: {
+    minHeight: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+    paddingHorizontal: 16,
+    backgroundColor: '#f2f4f8',
+    borderWidth: 1,
+    borderColor: '#dce0eb',
+    borderRadius: 10,
+  },
+
+  editButtonText: {
+    color: '#4f5668',
     fontSize: 14,
     fontWeight: '700',
   },
