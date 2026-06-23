@@ -68,3 +68,38 @@ class ModuleResponse(ModuleBase):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class WordBase(BaseModel):
+    word: str = Field(min_length=1, max_length=255)
+    translation: str = Field(min_length=1, max_length=255)
+
+    @field_validator(
+        "word",
+        "translation",
+    )
+    @classmethod
+    def remove_word_extra_spaces(cls, value: str) -> str:
+        cleaned_value = value.strip()
+
+        if not cleaned_value:
+            raise ValueError("Hodnota nesmí být prázdná.")
+
+        return cleaned_value
+
+
+class WordCreate(WordBase):
+    pass
+
+
+class WordUpdate(WordBase):
+    pass
+
+
+class WordResponse(WordBase):
+    id: int
+    module_id: int
+    is_known: bool
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)

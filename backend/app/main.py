@@ -6,7 +6,8 @@ from sqlalchemy import text
 
 from . import models
 from .database import Base, SessionLocal, engine
-from .routers import auth, modules
+from .routers import auth, modules, words
+
 
 
 @asynccontextmanager
@@ -48,6 +49,7 @@ app.add_middleware(
 
 app.include_router(auth.router)
 app.include_router(modules.router)
+app.include_router(words.router)
 
 
 @app.get("/health")
