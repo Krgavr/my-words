@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from 'react';
+import * as SecureStore from 'expo-secure-store';
+
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -24,8 +26,21 @@ type LoginResponse = {
   token_type: string;
 };
 
+type ErrorResponse = {
+  detail?: string;
+};
+
+type VocabularyModule = {
+  id: number;
+  user_id: number;
+  name: string;
+  source_language: string;
+  target_language: string;
+  created_at: string;
+};
+
 const API_URL = (
-  process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000'
+  process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8000'
 ).replace(/\/$/, '');
 
 const TOKEN_KEY = 'my_words_access_token';
@@ -36,7 +51,6 @@ async function saveToken(token: string): Promise<void> {
     return;
   }
 
-  const SecureStore = await import('expo-secure-store');
   await SecureStore.setItemAsync(TOKEN_KEY, token);
 }
 
@@ -45,7 +59,6 @@ async function loadToken(): Promise<string | null> {
     return window.localStorage.getItem(TOKEN_KEY);
   }
 
-  const SecureStore = await import('expo-secure-store');
   return SecureStore.getItemAsync(TOKEN_KEY);
 }
 
@@ -55,7 +68,6 @@ async function deleteToken(): Promise<void> {
     return;
   }
 
-  const SecureStore = await import('expo-secure-store');
   await SecureStore.deleteItemAsync(TOKEN_KEY);
 }
 
@@ -73,24 +85,43 @@ async function getCurrentUser(token: string): Promise<User | null> {
   }
 
   if (!response.ok) {
-    throw new Error(`Chyba serveru: ${response.status}`);
+    throw new Error(`Server vrátil chybu ${response.status}.`);
   }
 
   return (await response.json()) as User;
+}
+
+async function getModules(token: string): Promise<VocabularyModule[]> {
+  const response = await fetch(`${API_URL}/modules`, {
+    method: 'GET',
+    headers: {
+      Accept: 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Server vrátil chybu ${response.status}.`);
+  }
+
+  return (await response.json()) as VocabularyModule[];
 }
 
 export default function App() {
   const [login, setLogin] = useState('');
   const [password, setPassword] = useState('');
 
-  const [token, setToken] = useState<string | null>(null);
-  const [user, setUser] = useState<User | null>(null);
+  const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [modules, setModules] = useState<VocabularyModule[]>([]);
 
   const [message, setMessage] = useState('');
+  const [modulesMessage, setModulesMessage] = useState('');
   const [isError, setIsError] = useState(false);
 
   const [isLoading, setIsLoading] = useState(false);
   const [isInitializing, setIsInitializing] = useState(true);
+  const [isModulesLoading, setIsModulesLoading] = useState(false);
 
   useEffect(() => {
     const restoreSession = async () => {
@@ -101,15 +132,27 @@ export default function App() {
           return;
         }
 
-        const currentUser = await getCurrentUser(storedToken);
+        const user = await getCurrentUser(storedToken);
 
-        if (!currentUser) {
+        if (!user) {
           await deleteToken();
           return;
         }
 
-        setToken(storedToken);
-        setUser(currentUser);
+        setAccessToken(storedToken);
+        setCurrentUser(user);
+
+        setIsModulesLoading(true);
+
+        try {
+          const userModules = await getModules(storedToken);
+          setModules(userModules);
+        } catch (error) {
+          console.error('Chyba při načítání modulů:', error);
+          setModulesMessage('Moduly se nepodařilo načíst.');
+        } finally {
+          setIsModulesLoading(false);
+        }
       } catch (error) {
         console.error('Chyba při obnovení přihlášení:', error);
         await deleteToken();
@@ -118,7 +161,7 @@ export default function App() {
       }
     };
 
-    restoreSession();
+    void restoreSession();
   }, []);
 
   const handleLogin = async () => {
@@ -147,7 +190,9 @@ export default function App() {
         }),
       });
 
-      const data = await response.json();
+      const data = (await response.json()) as
+        | LoginResponse
+        | ErrorResponse;
 
       if (!response.ok) {
         if (response.status === 401) {
@@ -155,7 +200,9 @@ export default function App() {
             'Nesprávné uživatelské jméno, e-mail nebo heslo.',
           );
         } else {
-          setMessage('Přihlášení se nezdařilo.');
+          setMessage(
+            'Přihlášení se nezdařilo. Zkuste to prosím znovu.',
+          );
         }
 
         setIsError(true);
@@ -170,21 +217,35 @@ export default function App() {
         return;
       }
 
-      const currentUser = await getCurrentUser(
-        loginData.access_token,
-      );
+      const user = await getCurrentUser(loginData.access_token);
 
-      if (!currentUser) {
-        setMessage('Přístupový token není platný.');
+      if (!user) {
+        setMessage(
+          'Přístupový token není platný. Přihlaste se znovu.',
+        );
         setIsError(true);
         return;
       }
 
       await saveToken(loginData.access_token);
 
-      setToken(loginData.access_token);
-      setUser(currentUser);
+      setAccessToken(loginData.access_token);
+      setCurrentUser(user);
       setPassword('');
+      setMessage('');
+
+      setIsModulesLoading(true);
+      setModulesMessage('');
+
+      try {
+        const userModules = await getModules(loginData.access_token);
+        setModules(userModules);
+      } catch (error) {
+        console.error('Chyba při načítání modulů:', error);
+        setModulesMessage('Moduly se nepodařilo načíst.');
+      } finally {
+        setIsModulesLoading(false);
+      }
     } catch (error) {
       console.error('Chyba při přihlašování:', error);
 
@@ -203,17 +264,32 @@ export default function App() {
     try {
       await deleteToken();
 
-      setToken(null);
-      setUser(null);
+      setAccessToken(null);
+      setCurrentUser(null);
+      setModules([]);
+
       setLogin('');
       setPassword('');
       setMessage('');
+      setModulesMessage('');
       setIsError(false);
     } catch (error) {
       console.error('Chyba při odhlašování:', error);
+      setModulesMessage('Odhlášení se nezdařilo.');
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleRegister = () => {
+    setMessage('Registrační stránku přidáme v dalším kroku.');
+    setIsError(false);
+  };
+
+  const handleCreateModule = () => {
+    setModulesMessage(
+      'Formulář pro vytvoření modulu přidáme v dalším kroku.',
+    );
   };
 
   if (isInitializing) {
@@ -230,7 +306,7 @@ export default function App() {
     );
   }
 
-  if (token && user) {
+  if (accessToken && currentUser) {
     return (
       <SafeAreaView style={styles.safeArea}>
         <ScrollView contentContainerStyle={styles.homePage}>
@@ -242,13 +318,18 @@ export default function App() {
                 style={({ pressed }) => [
                   styles.logoutButton,
                   pressed && styles.buttonPressed,
+                  isLoading && styles.disabledButton,
                 ]}
                 onPress={handleLogout}
                 disabled={isLoading}
               >
-                <Text style={styles.logoutButtonText}>
-                  Odhlásit se
-                </Text>
+                {isLoading ? (
+                  <ActivityIndicator color="#4967e8" />
+                ) : (
+                  <Text style={styles.logoutButtonText}>
+                    Odhlásit se
+                  </Text>
+                )}
               </Pressable>
             </View>
 
@@ -258,20 +339,22 @@ export default function App() {
               </Text>
 
               <Text style={styles.welcomeTitle}>
-                Vítejte, {user.username}
+                Vítejte, {currentUser.username}
               </Text>
 
-              <Text style={styles.userEmail}>{user.email}</Text>
+              <Text style={styles.userEmail}>
+                {currentUser.email}
+              </Text>
             </View>
 
             <View style={styles.modulesHeader}>
-              <View>
+              <View style={styles.modulesTitleContainer}>
                 <Text style={styles.sectionTitle}>
                   Vaše moduly
                 </Text>
 
                 <Text style={styles.sectionSubtitle}>
-                  Zde budou vaše vlastní sady slovíček.
+                  Vlastní sady slovíček a překladů.
                 </Text>
               </View>
 
@@ -280,12 +363,7 @@ export default function App() {
                   styles.createButton,
                   pressed && styles.buttonPressed,
                 ]}
-                onPress={() => {
-                  setMessage(
-                    'Vytváření modulů přidáme v dalším kroku.',
-                  );
-                  setIsError(false);
-                }}
+                onPress={handleCreateModule}
               >
                 <Text style={styles.createButtonText}>
                   Vytvořit modul
@@ -293,22 +371,86 @@ export default function App() {
               </Pressable>
             </View>
 
-            {message !== '' && (
-              <Text style={styles.homeMessage}>{message}</Text>
+            {modulesMessage !== '' && (
+              <Text style={styles.modulesMessage}>
+                {modulesMessage}
+              </Text>
             )}
 
-            <View style={styles.emptyCard}>
-              <Text style={styles.emptyIcon}>A–Z</Text>
+            {isModulesLoading ? (
+              <View style={styles.modulesLoading}>
+                <ActivityIndicator
+                  size="large"
+                  color="#4967e8"
+                />
 
-              <Text style={styles.emptyTitle}>
-                Zatím nemáte žádné moduly
-              </Text>
+                <Text style={styles.loadingText}>
+                  Načítání modulů...
+                </Text>
+              </View>
+            ) : modules.length === 0 ? (
+              <View style={styles.emptyCard}>
+                <Text style={styles.emptyIcon}>A–Z</Text>
 
-              <Text style={styles.emptyText}>
-                Vytvořte svůj první modul a přidejte do něj
-                slovíčka a překlady.
-              </Text>
-            </View>
+                <Text style={styles.emptyTitle}>
+                  Zatím nemáte žádné moduly
+                </Text>
+
+                <Text style={styles.emptyText}>
+                  Vytvořte svůj první modul a přidejte do něj
+                  slovíčka a překlady.
+                </Text>
+
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.emptyButton,
+                    pressed && styles.buttonPressed,
+                  ]}
+                  onPress={handleCreateModule}
+                >
+                  <Text style={styles.emptyButtonText}>
+                    Vytvořit první modul
+                  </Text>
+                </Pressable>
+              </View>
+            ) : (
+              <View style={styles.modulesList}>
+                {modules.map((module) => (
+                  <View
+                    key={module.id}
+                    style={styles.moduleCard}
+                  >
+                    <View style={styles.moduleInformation}>
+                      <Text style={styles.moduleName}>
+                        {module.name}
+                      </Text>
+
+                      <Text style={styles.languagePair}>
+                        {module.source_language}
+                        {' → '}
+                        {module.target_language}
+                      </Text>
+                    </View>
+
+                    <Pressable
+                      style={({ pressed }) => [
+                        styles.openButton,
+                        pressed && styles.buttonPressed,
+                      ]}
+                      onPress={() =>
+                        setModulesMessage(
+                          `Otevření modulu „${module.name}“ přidáme později.`,
+                        )
+                      }
+                    >
+                      <Text style={styles.openButtonText}>
+                        Otevřít
+                      </Text>
+                    </Pressable>
+                  </View>
+                ))}
+              </View>
+            )}
           </View>
         </ScrollView>
       </SafeAreaView>
@@ -346,6 +488,7 @@ export default function App() {
                   autoCapitalize="none"
                   autoCorrect={false}
                   editable={!isLoading}
+                  returnKeyType="next"
                 />
               </View>
 
@@ -361,6 +504,7 @@ export default function App() {
                   autoCapitalize="none"
                   autoCorrect={false}
                   editable={!isLoading}
+                  returnKeyType="done"
                   onSubmitEditing={handleLogin}
                 />
               </View>
@@ -371,7 +515,7 @@ export default function App() {
                     styles.message,
                     isError
                       ? styles.errorMessage
-                      : styles.successMessage,
+                      : styles.informationMessage,
                   ]}
                 >
                   {message}
@@ -403,12 +547,8 @@ export default function App() {
               </Text>
 
               <Pressable
-                onPress={() => {
-                  setMessage(
-                    'Registrační stránku přidáme později.',
-                  );
-                  setIsError(false);
-                }}
+                onPress={handleRegister}
+                disabled={isLoading}
               >
                 <Text style={styles.registerLink}>
                   Zaregistrovat se
@@ -522,8 +662,8 @@ const styles = StyleSheet.create({
     color: '#c83e4d',
   },
 
-  successMessage: {
-    color: '#27864a',
+  informationMessage: {
+    color: '#4967e8',
   },
 
   loginButton: {
@@ -580,6 +720,7 @@ const styles = StyleSheet.create({
 
   header: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 32,
@@ -641,6 +782,11 @@ const styles = StyleSheet.create({
     marginTop: 36,
   },
 
+  modulesTitleContainer: {
+    marginRight: 20,
+    marginBottom: 16,
+  },
+
   sectionTitle: {
     color: '#202535',
     fontSize: 24,
@@ -651,13 +797,14 @@ const styles = StyleSheet.create({
     marginTop: 6,
     color: '#6f7688',
     fontSize: 15,
+    lineHeight: 22,
   },
 
   createButton: {
     minHeight: 48,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 16,
+    marginBottom: 16,
     paddingHorizontal: 20,
     backgroundColor: '#4967e8',
     borderRadius: 12,
@@ -669,16 +816,71 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 
-  homeMessage: {
-    marginTop: 20,
+  modulesMessage: {
+    marginBottom: 18,
     color: '#6f7688',
     fontSize: 14,
     textAlign: 'center',
   },
 
+  modulesLoading: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 220,
+  },
+
+  modulesList: {
+    marginTop: 8,
+  },
+
+  moduleCard: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 14,
+    padding: 22,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#e7eaf2',
+    borderRadius: 16,
+  },
+
+  moduleInformation: {
+    marginRight: 20,
+    marginBottom: 8,
+  },
+
+  moduleName: {
+    color: '#202535',
+    fontSize: 19,
+    fontWeight: '800',
+  },
+
+  languagePair: {
+    marginTop: 7,
+    color: '#6f7688',
+    fontSize: 15,
+  },
+
+  openButton: {
+    minHeight: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 18,
+    backgroundColor: '#eef1ff',
+    borderRadius: 10,
+  },
+
+  openButtonText: {
+    color: '#4967e8',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+
   emptyCard: {
     alignItems: 'center',
-    marginTop: 24,
+    marginTop: 12,
     paddingHorizontal: 24,
     paddingVertical: 48,
     backgroundColor: '#ffffff',
@@ -709,4 +911,21 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     textAlign: 'center',
   },
+
+  emptyButton: {
+    minHeight: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 24,
+    paddingHorizontal: 22,
+    backgroundColor: '#4967e8',
+    borderRadius: 12,
+  },
+
+  emptyButtonText: {
+    color: '#ffffff',
+    fontSize: 15,
+    fontWeight: '700',
+  },
 });
+
