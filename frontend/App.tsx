@@ -299,6 +299,27 @@ async function deleteWordRequest(
   }
 }
 
+function shuffleWords(wordCards: WordCard[]): WordCard[] {
+  const shuffledWords = [...wordCards];
+
+  for (
+    let currentIndex = shuffledWords.length - 1;
+    currentIndex > 0;
+    currentIndex -= 1
+  ) {
+    const randomIndex = Math.floor(
+      Math.random() * (currentIndex + 1),
+    );
+
+    [shuffledWords[currentIndex], shuffledWords[randomIndex]] = [
+      shuffledWords[randomIndex],
+      shuffledWords[currentIndex],
+    ];
+  }
+
+  return shuffledWords;
+}
+
 async function confirmModuleDeletion(
   module: VocabularyModule,
 ): Promise<boolean> {
@@ -429,6 +450,17 @@ export default function App() {
   const [isSavingEditedWord, setIsSavingEditedWord] =
     useState(false);
   const [isResettingWords, setIsResettingWords] = useState(false);
+
+  const [isStudyMode, setIsStudyMode] = useState(false);
+  const [studyWords, setStudyWords] = useState<WordCard[]>([]);
+  const [currentStudyIndex, setCurrentStudyIndex] = useState(0);
+  const [isStudyTranslationVisible, setIsStudyTranslationVisible] =
+    useState(false);
+  const [isStudyAnswerLoading, setIsStudyAnswerLoading] =
+    useState(false);
+  const [isStudyComplete, setIsStudyComplete] = useState(false);
+  const [studyKnownCount, setStudyKnownCount] = useState(0);
+  const [studyErrorMessage, setStudyErrorMessage] = useState('');
 
   useEffect(() => {
     const restoreSession = async () => {
@@ -601,6 +633,14 @@ export default function App() {
       setDeletingWordId(null);
       setEditingWordId(null);
       setIsResettingWords(false);
+      setIsStudyMode(false);
+      setStudyWords([]);
+      setCurrentStudyIndex(0);
+      setIsStudyTranslationVisible(false);
+      setIsStudyAnswerLoading(false);
+      setIsStudyComplete(false);
+      setStudyKnownCount(0);
+      setStudyErrorMessage('');
 
       setIsError(false);
       setIsModulesMessageError(false);
@@ -835,6 +875,14 @@ export default function App() {
     setWordsMessage('');
     setIsWordsMessageError(false);
     setIsResettingWords(false);
+    setIsStudyMode(false);
+    setStudyWords([]);
+    setCurrentStudyIndex(0);
+    setIsStudyTranslationVisible(false);
+    setIsStudyAnswerLoading(false);
+    setIsStudyComplete(false);
+    setStudyKnownCount(0);
+    setStudyErrorMessage('');
     setIsWordsLoading(true);
 
     try {
@@ -863,6 +911,14 @@ export default function App() {
     setUpdatingWordId(null);
     setDeletingWordId(null);
     setIsResettingWords(false);
+    setIsStudyMode(false);
+    setStudyWords([]);
+    setCurrentStudyIndex(0);
+    setIsStudyTranslationVisible(false);
+    setIsStudyAnswerLoading(false);
+    setIsStudyComplete(false);
+    setStudyKnownCount(0);
+    setStudyErrorMessage('');
   };
 
   const handleOpenCreateWordForm = () => {
@@ -1119,6 +1175,113 @@ export default function App() {
     }
   };
 
+  const handleStartUnknownStudy = () => {
+    const unknownWords = words.filter(
+      (wordCard) => !wordCard.is_known,
+    );
+
+    if (unknownWords.length === 0) {
+      return;
+    }
+
+    const shuffledUnknownWords = shuffleWords(unknownWords);
+
+    setStudyWords(shuffledUnknownWords);
+    setCurrentStudyIndex(0);
+    setIsStudyTranslationVisible(false);
+    setIsStudyAnswerLoading(false);
+    setIsStudyComplete(false);
+    setStudyKnownCount(0);
+    setStudyErrorMessage('');
+    setIsStudyMode(true);
+    setWordsMessage('');
+    setIsWordsMessageError(false);
+  };
+
+  const handleExitStudy = () => {
+    setIsStudyMode(false);
+    setStudyWords([]);
+    setCurrentStudyIndex(0);
+    setIsStudyTranslationVisible(false);
+    setIsStudyAnswerLoading(false);
+    setIsStudyComplete(false);
+    setStudyKnownCount(0);
+    setStudyErrorMessage('');
+  };
+
+  const handleShowStudyTranslation = () => {
+    setIsStudyTranslationVisible(true);
+    setStudyErrorMessage('');
+  };
+
+  const handleStudyAnswer = async (markAsKnown: boolean) => {
+    if (!accessToken) {
+      setStudyErrorMessage(
+        'Pro změnu stavu slovíčka se musíte přihlásit.',
+      );
+      return;
+    }
+
+    const currentStudyWord = studyWords[currentStudyIndex];
+
+    if (!currentStudyWord) {
+      return;
+    }
+
+    setIsStudyAnswerLoading(true);
+    setStudyErrorMessage('');
+
+    try {
+      if (markAsKnown) {
+        const updatedWord = await updateWordStatusRequest(
+          accessToken,
+          currentStudyWord.id,
+          true,
+        );
+
+        setWords((currentWords) =>
+          currentWords.map((wordCard) =>
+            wordCard.id === updatedWord.id
+              ? updatedWord
+              : wordCard,
+          ),
+        );
+
+        setStudyWords((currentStudyWords) =>
+          currentStudyWords.map((wordCard) =>
+            wordCard.id === updatedWord.id
+              ? updatedWord
+              : wordCard,
+          ),
+        );
+
+        setStudyKnownCount((currentCount) => currentCount + 1);
+      }
+
+      const isLastWord =
+        currentStudyIndex >= studyWords.length - 1;
+
+      if (isLastWord) {
+        setIsStudyComplete(true);
+        setIsStudyTranslationVisible(false);
+      } else {
+        setCurrentStudyIndex((currentIndex) => currentIndex + 1);
+        setIsStudyTranslationVisible(false);
+      }
+    } catch (error) {
+      console.error(
+        'Chyba při ukládání odpovědi ve studijním režimu:',
+        error,
+      );
+
+      setStudyErrorMessage(
+        'Odpověď se nepodařilo uložit. Zkuste to znovu.',
+      );
+    } finally {
+      setIsStudyAnswerLoading(false);
+    }
+  };
+
   const handleDeleteWord = async (wordCard: WordCard) => {
     if (!accessToken) {
       setWordsMessage(
@@ -1171,6 +1334,219 @@ export default function App() {
           <ActivityIndicator size="large" color="#4967e8" />
           <Text style={styles.loadingText}>Načítání aplikace...</Text>
         </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (
+    accessToken &&
+    currentUser &&
+    selectedModule &&
+    isStudyMode &&
+    studyWords.length > 0
+  ) {
+    const currentStudyWord = studyWords[currentStudyIndex];
+    const remainingUnknownCount = words.filter(
+      (wordCard) => !wordCard.is_known,
+    ).length;
+
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <ScrollView
+          contentContainerStyle={styles.studyPage}
+          keyboardShouldPersistTaps="handled"
+        >
+          <View style={styles.studyContainer}>
+            <View style={styles.header}>
+              <Text style={styles.homeLogo}>My Words</Text>
+
+              <Pressable
+                style={({ pressed }) => [
+                  styles.logoutButton,
+                  pressed && styles.buttonPressed,
+                  isLoading && styles.disabledButton,
+                ]}
+                onPress={handleLogout}
+                disabled={isLoading || isStudyAnswerLoading}
+              >
+                {isLoading ? (
+                  <ActivityIndicator color="#4967e8" />
+                ) : (
+                  <Text style={styles.logoutButtonText}>
+                    Odhlásit se
+                  </Text>
+                )}
+              </Pressable>
+            </View>
+
+            <Pressable
+              style={({ pressed }) => [
+                styles.backButton,
+                pressed && styles.buttonPressed,
+                isStudyAnswerLoading && styles.disabledButton,
+              ]}
+              onPress={handleExitStudy}
+              disabled={isStudyAnswerLoading}
+            >
+              <Text style={styles.backButtonText}>
+                ← Zpět do modulu
+              </Text>
+            </Pressable>
+
+            {isStudyComplete ? (
+              <View style={styles.studyCompleteCard}>
+                <Text style={styles.studyCompleteTitle}>
+                  Studium dokončeno
+                </Text>
+
+                <Text style={styles.studyCompleteText}>
+                  Prošli jste všechna neznámá slovíčka v tomto kole.
+                </Text>
+
+                <View style={styles.studyCompleteStats}>
+                  <View style={styles.studyCompleteStat}>
+                    <Text style={styles.studyCompleteValue}>
+                      {studyKnownCount}
+                    </Text>
+                    <Text style={styles.studyCompleteLabel}>
+                      Nově známých
+                    </Text>
+                  </View>
+
+                  <View style={styles.studyCompleteStat}>
+                    <Text style={styles.studyCompleteValue}>
+                      {remainingUnknownCount}
+                    </Text>
+                    <Text style={styles.studyCompleteLabel}>
+                      Stále neznámých
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.studyCompleteActions}>
+                  {remainingUnknownCount > 0 && (
+                    <Pressable
+                      style={({ pressed }) => [
+                        styles.studyRestartButton,
+                        pressed && styles.buttonPressed,
+                      ]}
+                      onPress={handleStartUnknownStudy}
+                    >
+                      <Text style={styles.studyRestartButtonText}>
+                        Studovat zbývající neznámá
+                      </Text>
+                    </Pressable>
+                  )}
+
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.backButton,
+                      styles.studyCompleteBackButton,
+                      pressed && styles.buttonPressed,
+                    ]}
+                    onPress={handleExitStudy}
+                  >
+                    <Text style={styles.backButtonText}>
+                      Zpět do modulu
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
+            ) : (
+              <>
+                <View style={styles.studyHeading}>
+                  <Text style={styles.studyTitle}>
+                    Studovat neznámá slova
+                  </Text>
+
+                  <Text style={styles.studyProgress}>
+                    Slovo {currentStudyIndex + 1} z {studyWords.length}
+                  </Text>
+                </View>
+
+                <View style={styles.studyCard}>
+                  <Text style={styles.studyLanguageLabel}>
+                    {selectedModule.source_language}
+                  </Text>
+
+                  <Text style={styles.studyWord}>
+                    {currentStudyWord.word}
+                  </Text>
+
+                  {isStudyTranslationVisible ? (
+                    <View style={styles.studyTranslationContainer}>
+                      <Text style={styles.studyLanguageLabel}>
+                        {selectedModule.target_language}
+                      </Text>
+
+                      <Text style={styles.studyTranslation}>
+                        {currentStudyWord.translation}
+                      </Text>
+                    </View>
+                  ) : (
+                    <Pressable
+                      style={({ pressed }) => [
+                        styles.showTranslationButton,
+                        pressed && styles.buttonPressed,
+                      ]}
+                      onPress={handleShowStudyTranslation}
+                    >
+                      <Text style={styles.showTranslationButtonText}>
+                        Zobrazit překlad
+                      </Text>
+                    </Pressable>
+                  )}
+                </View>
+
+                {studyErrorMessage !== '' && (
+                  <Text style={styles.studyErrorMessage}>
+                    {studyErrorMessage}
+                  </Text>
+                )}
+
+                {isStudyTranslationVisible && (
+                  <View style={styles.studyAnswerButtons}>
+                    <Pressable
+                      style={({ pressed }) => [
+                        styles.studyUnknownButton,
+                        pressed && styles.buttonPressed,
+                        isStudyAnswerLoading && styles.disabledButton,
+                      ]}
+                      onPress={() => {
+                        void handleStudyAnswer(false);
+                      }}
+                      disabled={isStudyAnswerLoading}
+                    >
+                      <Text style={styles.studyUnknownButtonText}>
+                        Neznám
+                      </Text>
+                    </Pressable>
+
+                    <Pressable
+                      style={({ pressed }) => [
+                        styles.studyKnownButton,
+                        pressed && styles.buttonPressed,
+                        isStudyAnswerLoading && styles.disabledButton,
+                      ]}
+                      onPress={() => {
+                        void handleStudyAnswer(true);
+                      }}
+                      disabled={isStudyAnswerLoading}
+                    >
+                      {isStudyAnswerLoading ? (
+                        <ActivityIndicator color="#ffffff" />
+                      ) : (
+                        <Text style={styles.studyKnownButtonText}>
+                          Znám
+                        </Text>
+                      )}
+                    </Pressable>
+                  </View>
+                )}
+              </>
+            )}
+          </View>
+        </ScrollView>
       </SafeAreaView>
     );
   }
@@ -1261,6 +1637,33 @@ export default function App() {
               </View>
 
               <View style={styles.wordsHeaderActions}>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.studyWordsButton,
+                    pressed && styles.buttonPressed,
+                    (words.length - knownWordsCount === 0 ||
+                      isWordsLoading) &&
+                      styles.disabledButton,
+                  ]}
+                  onPress={handleStartUnknownStudy}
+                  disabled={
+                    words.length - knownWordsCount === 0 ||
+                    isWordsLoading ||
+                    isResettingWords ||
+                    isCreatingWord ||
+                    isSavingEditedWord ||
+                    editingWordId !== null ||
+                    updatingWordId !== null ||
+                    deletingWordId !== null
+                  }
+                >
+                  <Text style={styles.studyWordsButtonText}>
+                    {words.length - knownWordsCount === 0
+                      ? 'Všechna slovíčka už znáte'
+                      : 'Studovat neznámá slova'}
+                  </Text>
+                </Pressable>
+
                 <Pressable
                   style={({ pressed }) => [
                     styles.resetWordsButton,
@@ -2344,6 +2747,25 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
 
+  studyWordsButton: {
+    minHeight: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+    marginBottom: 16,
+    paddingHorizontal: 18,
+    backgroundColor: '#e7f7ed',
+    borderWidth: 1,
+    borderColor: '#b9e4c8',
+    borderRadius: 12,
+  },
+
+  studyWordsButtonText: {
+    color: '#27864a',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+
   resetWordsButton: {
     minHeight: 48,
     alignItems: 'center',
@@ -2722,6 +3144,224 @@ const styles = StyleSheet.create({
     marginTop: 4,
     color: '#dfe5ff',
     fontSize: 13,
+  },
+
+  studyPage: {
+    flexGrow: 1,
+    padding: 24,
+  },
+
+  studyContainer: {
+    width: '100%',
+    maxWidth: 760,
+    alignSelf: 'center',
+  },
+
+  studyHeading: {
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+
+  studyTitle: {
+    color: '#202535',
+    fontSize: 28,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+
+  studyProgress: {
+    marginTop: 8,
+    color: '#6f7688',
+    fontSize: 15,
+  },
+
+  studyCard: {
+    minHeight: 360,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 32,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#e7eaf2',
+    borderRadius: 24,
+  },
+
+  studyLanguageLabel: {
+    color: '#6f7688',
+    fontSize: 13,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+  },
+
+  studyWord: {
+    marginTop: 16,
+    color: '#202535',
+    fontSize: 40,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+
+  studyTranslationContainer: {
+    alignItems: 'center',
+    marginTop: 46,
+    paddingTop: 28,
+    width: '100%',
+    borderTopWidth: 1,
+    borderTopColor: '#e7eaf2',
+  },
+
+  studyTranslation: {
+    marginTop: 12,
+    color: '#4967e8',
+    fontSize: 32,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+
+  showTranslationButton: {
+    minHeight: 50,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 48,
+    paddingHorizontal: 24,
+    backgroundColor: '#4967e8',
+    borderRadius: 12,
+  },
+
+  showTranslationButtonText: {
+    color: '#ffffff',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+
+  studyAnswerButtons: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginTop: 22,
+  },
+
+  studyUnknownButton: {
+    minWidth: 150,
+    minHeight: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 14,
+    paddingHorizontal: 22,
+    backgroundColor: '#fff4e5',
+    borderWidth: 1,
+    borderColor: '#f2d4a8',
+    borderRadius: 12,
+  },
+
+  studyUnknownButtonText: {
+    color: '#9a661f',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+
+  studyKnownButton: {
+    minWidth: 150,
+    minHeight: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 22,
+    backgroundColor: '#27864a',
+    borderRadius: 12,
+  },
+
+  studyKnownButtonText: {
+    color: '#ffffff',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+
+  studyErrorMessage: {
+    marginTop: 18,
+    color: '#c83e4d',
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: 'center',
+  },
+
+  studyCompleteCard: {
+    alignItems: 'center',
+    padding: 36,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#e7eaf2',
+    borderRadius: 24,
+  },
+
+  studyCompleteTitle: {
+    color: '#202535',
+    fontSize: 30,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+
+  studyCompleteText: {
+    maxWidth: 520,
+    marginTop: 12,
+    color: '#6f7688',
+    fontSize: 15,
+    lineHeight: 22,
+    textAlign: 'center',
+  },
+
+  studyCompleteStats: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    marginTop: 30,
+  },
+
+  studyCompleteStat: {
+    minWidth: 150,
+    alignItems: 'center',
+    marginHorizontal: 12,
+    marginBottom: 12,
+    padding: 20,
+    backgroundColor: '#f8f9fc',
+    borderRadius: 14,
+  },
+
+  studyCompleteValue: {
+    color: '#4967e8',
+    fontSize: 28,
+    fontWeight: '800',
+  },
+
+  studyCompleteLabel: {
+    marginTop: 6,
+    color: '#6f7688',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+
+  studyCompleteActions: {
+    alignItems: 'center',
+    marginTop: 24,
+  },
+
+  studyRestartButton: {
+    minHeight: 50,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+    paddingHorizontal: 24,
+    backgroundColor: '#4967e8',
+    borderRadius: 12,
+  },
+
+  studyRestartButtonText: {
+    color: '#ffffff',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+
+  studyCompleteBackButton: {
+    alignSelf: 'center',
+    marginBottom: 0,
   },
 
   wordsList: {
