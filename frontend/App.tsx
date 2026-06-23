@@ -3,6 +3,7 @@ import * as SecureStore from 'expo-secure-store';
 
 import {
   ActivityIndicator,
+  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -136,6 +137,57 @@ async function createModule(
   return (await response.json()) as VocabularyModule;
 }
 
+async function deleteModuleRequest(
+  token: string,
+  moduleId: number,
+): Promise<void> {
+  const response = await fetch(`${API_URL}/modules/${moduleId}`, {
+    method: 'DELETE',
+    headers: {
+      Accept: 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Server vrátil chybu ${response.status}.`);
+  }
+}
+
+async function confirmModuleDeletion(
+  module: VocabularyModule,
+): Promise<boolean> {
+  const confirmationText =
+    `Opravdu chcete odstranit modul „${module.name}“?`;
+
+  if (Platform.OS === 'web') {
+    return window.confirm(confirmationText);
+  }
+
+  return new Promise((resolve) => {
+    Alert.alert(
+      'Odstranit modul',
+      confirmationText,
+      [
+        {
+          text: 'Zrušit',
+          style: 'cancel',
+          onPress: () => resolve(false),
+        },
+        {
+          text: 'Odstranit',
+          style: 'destructive',
+          onPress: () => resolve(true),
+        },
+      ],
+      {
+        cancelable: true,
+        onDismiss: () => resolve(false),
+      },
+    );
+  });
+}
+
 export default function App() {
   const [login, setLogin] = useState('');
   const [password, setPassword] = useState('');
@@ -171,6 +223,10 @@ export default function App() {
   const [isCreatingModule, setIsCreatingModule] =
     useState(false);
 
+  const [deletingModuleId, setDeletingModuleId] = useState<
+    number | null
+  >(null);
+
   useEffect(() => {
     const restoreSession = async () => {
       try {
@@ -197,9 +253,7 @@ export default function App() {
         } catch (error) {
           console.error('Chyba při načítání modulů:', error);
 
-          setModulesMessage(
-            'Moduly se nepodařilo načíst.',
-          );
+          setModulesMessage('Moduly se nepodařilo načíst.');
           setIsModulesMessageError(true);
         } finally {
           setIsModulesLoading(false);
@@ -223,9 +277,7 @@ export default function App() {
     const normalizedLogin = login.trim();
 
     if (!normalizedLogin || !password) {
-      setMessage(
-        'Vyplňte uživatelské jméno a heslo.',
-      );
+      setMessage('Vyplňte uživatelské jméno a heslo.');
       setIsError(true);
       return;
     }
@@ -269,9 +321,7 @@ export default function App() {
       const loginData = data as LoginResponse;
 
       if (!loginData.access_token) {
-        setMessage(
-          'Server nevrátil přístupový token.',
-        );
+        setMessage('Server nevrátil přístupový token.');
         setIsError(true);
         return;
       }
@@ -305,14 +355,9 @@ export default function App() {
 
         setModules(userModules);
       } catch (error) {
-        console.error(
-          'Chyba při načítání modulů:',
-          error,
-        );
+        console.error('Chyba při načítání modulů:', error);
 
-        setModulesMessage(
-          'Moduly se nepodařilo načíst.',
-        );
+        setModulesMessage('Moduly se nepodařilo načíst.');
         setIsModulesMessageError(true);
       } finally {
         setIsModulesLoading(false);
@@ -349,14 +394,13 @@ export default function App() {
       setTargetLanguage('');
 
       setIsCreateFormOpen(false);
+      setDeletingModuleId(null);
       setIsError(false);
       setIsModulesMessageError(false);
     } catch (error) {
       console.error('Chyba při odhlašování:', error);
 
-      setModulesMessage(
-        'Odhlášení se nezdařilo.',
-      );
+      setModulesMessage('Odhlášení se nezdařilo.');
       setIsModulesMessageError(true);
     } finally {
       setIsLoading(false);
@@ -364,9 +408,7 @@ export default function App() {
   };
 
   const handleRegister = () => {
-    setMessage(
-      'Registrační stránku přidáme v dalším kroku.',
-    );
+    setMessage('Registrační stránku přidáme později.');
     setIsError(false);
   };
 
@@ -419,14 +461,11 @@ export default function App() {
     setIsModulesMessageError(false);
 
     try {
-      const newModule = await createModule(
-        accessToken,
-        {
-          name: normalizedName,
-          source_language: normalizedSourceLanguage,
-          target_language: normalizedTargetLanguage,
-        },
-      );
+      const newModule = await createModule(accessToken, {
+        name: normalizedName,
+        source_language: normalizedSourceLanguage,
+        target_language: normalizedTargetLanguage,
+      });
 
       setModules((currentModules) => [
         newModule,
@@ -436,25 +475,63 @@ export default function App() {
       setModuleName('');
       setSourceLanguage('');
       setTargetLanguage('');
-
       setIsCreateFormOpen(false);
 
-      setModulesMessage(
-        'Modul byl úspěšně vytvořen.',
-      );
+      setModulesMessage('Modul byl úspěšně vytvořen.');
       setIsModulesMessageError(false);
     } catch (error) {
-      console.error(
-        'Chyba při vytváření modulu:',
-        error,
-      );
+      console.error('Chyba při vytváření modulu:', error);
 
-      setModulesMessage(
-        'Modul se nepodařilo vytvořit.',
-      );
+      setModulesMessage('Modul se nepodařilo vytvořit.');
       setIsModulesMessageError(true);
     } finally {
       setIsCreatingModule(false);
+    }
+  };
+
+  const handleDeleteModule = async (
+    module: VocabularyModule,
+  ) => {
+    if (!accessToken) {
+      setModulesMessage(
+        'Pro odstranění modulu se musíte přihlásit.',
+      );
+      setIsModulesMessageError(true);
+      return;
+    }
+
+    const isConfirmed = await confirmModuleDeletion(module);
+
+    if (!isConfirmed) {
+      return;
+    }
+
+    setDeletingModuleId(module.id);
+    setModulesMessage('');
+    setIsModulesMessageError(false);
+
+    try {
+      await deleteModuleRequest(accessToken, module.id);
+
+      setModules((currentModules) =>
+        currentModules.filter(
+          (currentModule) => currentModule.id !== module.id,
+        ),
+      );
+
+      setModulesMessage(
+        `Modul „${module.name}“ byl úspěšně odstraněn.`,
+      );
+      setIsModulesMessageError(false);
+    } catch (error) {
+      console.error('Chyba při odstraňování modulu:', error);
+
+      setModulesMessage(
+        `Modul „${module.name}“ se nepodařilo odstranit.`,
+      );
+      setIsModulesMessageError(true);
+    } finally {
+      setDeletingModuleId(null);
     }
   };
 
@@ -565,8 +642,7 @@ export default function App() {
                 </Text>
 
                 <Text style={styles.createFormDescription}>
-                  Zadejte název modulu a jazykovou
-                  kombinaci.
+                  Zadejte název modulu a jazykovou kombinaci.
                 </Text>
 
                 <View style={styles.createFormFields}>
@@ -710,40 +786,78 @@ export default function App() {
               </View>
             ) : (
               <View style={styles.modulesList}>
-                {modules.map((module) => (
-                  <View
-                    key={module.id}
-                    style={styles.moduleCard}
-                  >
+                {modules.map((module) => {
+                  const isDeleting =
+                    deletingModuleId === module.id;
+
+                  return (
                     <View
-                      style={styles.moduleInformation}
+                      key={module.id}
+                      style={styles.moduleCard}
                     >
-                      <Text style={styles.moduleName}>
-                        {module.name}
-                      </Text>
+                      <View
+                        style={styles.moduleInformation}
+                      >
+                        <Text style={styles.moduleName}>
+                          {module.name}
+                        </Text>
 
-                      <Text style={styles.languagePair}>
-                        {module.source_language}
-                        {' → '}
-                        {module.target_language}
-                      </Text>
+                        <Text style={styles.languagePair}>
+                          {module.source_language}
+                          {' → '}
+                          {module.target_language}
+                        </Text>
+                      </View>
+
+                      <View style={styles.moduleActions}>
+                        <Pressable
+                          style={({ pressed }) => [
+                            styles.openButton,
+                            pressed &&
+                              styles.buttonPressed,
+                          ]}
+                          onPress={() =>
+                            handleOpenModule(module)
+                          }
+                          disabled={isDeleting}
+                        >
+                          <Text
+                            style={styles.openButtonText}
+                          >
+                            Otevřít
+                          </Text>
+                        </Pressable>
+
+                        <Pressable
+                          style={({ pressed }) => [
+                            styles.deleteButton,
+                            pressed &&
+                              styles.buttonPressed,
+                            isDeleting &&
+                              styles.disabledButton,
+                          ]}
+                          onPress={() =>
+                            handleDeleteModule(module)
+                          }
+                          disabled={isDeleting}
+                        >
+                          {isDeleting ? (
+                            <ActivityIndicator
+                              size="small"
+                              color="#c83e4d"
+                            />
+                          ) : (
+                            <Text
+                              style={styles.deleteButtonText}
+                            >
+                              Smazat
+                            </Text>
+                          )}
+                        </Pressable>
+                      </View>
                     </View>
-
-                    <Pressable
-                      style={({ pressed }) => [
-                        styles.openButton,
-                        pressed && styles.buttonPressed,
-                      ]}
-                      onPress={() =>
-                        handleOpenModule(module)
-                      }
-                    >
-                      <Text style={styles.openButtonText}>
-                        Otevřít
-                      </Text>
-                    </Pressable>
-                  </View>
-                ))}
+                  );
+                })}
               </View>
             )}
           </View>
@@ -1239,6 +1353,7 @@ const styles = StyleSheet.create({
   },
 
   moduleInformation: {
+    flexGrow: 1,
     marginRight: 20,
     marginBottom: 8,
   },
@@ -1255,10 +1370,17 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
 
+  moduleActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+  },
+
   openButton: {
     minHeight: 42,
     alignItems: 'center',
     justifyContent: 'center',
+    marginRight: 10,
     paddingHorizontal: 18,
     backgroundColor: '#eef1ff',
     borderRadius: 10,
@@ -1266,6 +1388,24 @@ const styles = StyleSheet.create({
 
   openButtonText: {
     color: '#4967e8',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+
+  deleteButton: {
+    minWidth: 82,
+    minHeight: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+    backgroundColor: '#fff0f1',
+    borderWidth: 1,
+    borderColor: '#f3c7cc',
+    borderRadius: 10,
+  },
+
+  deleteButtonText: {
+    color: '#c83e4d',
     fontSize: 14,
     fontWeight: '700',
   },
