@@ -260,6 +260,23 @@ async function updateWordStatusRequest(
   return (await response.json()) as WordCard;
 }
 
+async function deleteWordRequest(
+  token: string,
+  wordId: number,
+): Promise<void> {
+  const response = await fetch(`${API_URL}/words/${wordId}`, {
+    method: 'DELETE',
+    headers: {
+      Accept: 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Server vrátil chybu ${response.status}.`);
+  }
+}
+
 async function confirmModuleDeletion(
   module: VocabularyModule,
 ): Promise<boolean> {
@@ -273,6 +290,40 @@ async function confirmModuleDeletion(
   return new Promise((resolve) => {
     Alert.alert(
       'Odstranit modul',
+      confirmationText,
+      [
+        {
+          text: 'Zrušit',
+          style: 'cancel',
+          onPress: () => resolve(false),
+        },
+        {
+          text: 'Odstranit',
+          style: 'destructive',
+          onPress: () => resolve(true),
+        },
+      ],
+      {
+        cancelable: true,
+        onDismiss: () => resolve(false),
+      },
+    );
+  });
+}
+
+async function confirmWordDeletion(
+  wordCard: WordCard,
+): Promise<boolean> {
+  const confirmationText =
+    `Opravdu chcete odstranit slovíčko „${wordCard.word}“?`;
+
+  if (Platform.OS === 'web') {
+    return window.confirm(confirmationText);
+  }
+
+  return new Promise((resolve) => {
+    Alert.alert(
+      'Odstranit slovíčko',
       confirmationText,
       [
         {
@@ -342,6 +393,9 @@ export default function App() {
   const [newTranslation, setNewTranslation] = useState('');
   const [isCreatingWord, setIsCreatingWord] = useState(false);
   const [updatingWordId, setUpdatingWordId] = useState<number | null>(
+    null,
+  );
+  const [deletingWordId, setDeletingWordId] = useState<number | null>(
     null,
   );
 
@@ -511,6 +565,7 @@ export default function App() {
       setEditingModuleId(null);
       setDeletingModuleId(null);
       setUpdatingWordId(null);
+      setDeletingWordId(null);
 
       setIsError(false);
       setIsModulesMessageError(false);
@@ -764,6 +819,7 @@ export default function App() {
     setWordsMessage('');
     setIsWordsMessageError(false);
     setUpdatingWordId(null);
+    setDeletingWordId(null);
   };
 
   const handleOpenCreateWordForm = () => {
@@ -816,7 +872,7 @@ export default function App() {
       setNewWord('');
       setNewTranslation('');
       setIsCreateWordFormOpen(false);
-      setWordsMessage('Slovíčko bylo úspěšně přidáno.');
+      setWordsMessage('');
       setIsWordsMessageError(false);
     } catch (error) {
       console.error('Chyba při vytváření slovíčka:', error);
@@ -857,11 +913,7 @@ export default function App() {
         ),
       );
 
-      setWordsMessage(
-        markAsKnown
-          ? `Slovíčko „${wordCard.word}“ je nyní označeno jako známé.`
-          : `Slovíčko „${wordCard.word}“ je nyní označeno jako neznámé.`,
-      );
+      setWordsMessage('');
       setIsWordsMessageError(false);
     } catch (error) {
       console.error('Chyba při změně stavu slovíčka:', error);
@@ -869,6 +921,45 @@ export default function App() {
       setIsWordsMessageError(true);
     } finally {
       setUpdatingWordId(null);
+    }
+  };
+
+  const handleDeleteWord = async (wordCard: WordCard) => {
+    if (!accessToken) {
+      setWordsMessage(
+        'Pro odstranění slovíčka se musíte přihlásit.',
+      );
+      setIsWordsMessageError(true);
+      return;
+    }
+
+    const isConfirmed = await confirmWordDeletion(wordCard);
+
+    if (!isConfirmed) {
+      return;
+    }
+
+    setDeletingWordId(wordCard.id);
+    setWordsMessage('');
+    setIsWordsMessageError(false);
+
+    try {
+      await deleteWordRequest(accessToken, wordCard.id);
+
+      setWords((currentWords) =>
+        currentWords.filter(
+          (currentWord) => currentWord.id !== wordCard.id,
+        ),
+      );
+
+      setWordsMessage('');
+      setIsWordsMessageError(false);
+    } catch (error) {
+      console.error('Chyba při odstraňování slovíčka:', error);
+      setWordsMessage('Slovíčko se nepodařilo odstranit.');
+      setIsWordsMessageError(true);
+    } finally {
+      setDeletingWordId(null);
     }
   };
 
@@ -1101,6 +1192,7 @@ export default function App() {
               <View style={styles.wordsList}>
                 {words.map((wordCard) => {
                   const isUpdating = updatingWordId === wordCard.id;
+                  const isDeleting = deletingWordId === wordCard.id;
 
                   return (
                     <View key={wordCard.id} style={styles.wordCard}>
@@ -1144,7 +1236,12 @@ export default function App() {
                           onPress={() => {
                             void handleToggleWordStatus(wordCard);
                           }}
-                          disabled={isUpdating || updatingWordId !== null}
+                          disabled={
+                            isUpdating ||
+                            isDeleting ||
+                            updatingWordId !== null ||
+                            deletingWordId !== null
+                          }
                         >
                           {isUpdating ? (
                             <ActivityIndicator
@@ -1165,6 +1262,34 @@ export default function App() {
                               {wordCard.is_known
                                 ? 'Označit jako neznámé'
                                 : 'Označit jako známé'}
+                            </Text>
+                          )}
+                        </Pressable>
+
+                        <Pressable
+                          style={({ pressed }) => [
+                            styles.wordDeleteButton,
+                            pressed && styles.buttonPressed,
+                            isDeleting && styles.disabledButton,
+                          ]}
+                          onPress={() => {
+                            void handleDeleteWord(wordCard);
+                          }}
+                          disabled={
+                            isDeleting ||
+                            isUpdating ||
+                            deletingWordId !== null ||
+                            updatingWordId !== null
+                          }
+                        >
+                          {isDeleting ? (
+                            <ActivityIndicator
+                              size="small"
+                              color="#c83e4d"
+                            />
+                          ) : (
+                            <Text style={styles.wordDeleteButtonText}>
+                              Smazat
                             </Text>
                           )}
                         </Pressable>
@@ -2323,5 +2448,25 @@ const styles = StyleSheet.create({
 
   markUnknownButtonText: {
     color: '#9a661f',
+  },
+
+  wordDeleteButton: {
+    minWidth: 82,
+    minHeight: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 10,
+    marginBottom: 6,
+    paddingHorizontal: 16,
+    backgroundColor: '#fff0f1',
+    borderWidth: 1,
+    borderColor: '#f3c7cc',
+    borderRadius: 10,
+  },
+
+  wordDeleteButtonText: {
+    color: '#c83e4d',
+    fontSize: 13,
+    fontWeight: '700',
   },
 });
