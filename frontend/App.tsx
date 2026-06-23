@@ -428,6 +428,7 @@ export default function App() {
   const [editTranslation, setEditTranslation] = useState('');
   const [isSavingEditedWord, setIsSavingEditedWord] =
     useState(false);
+  const [isResettingWords, setIsResettingWords] = useState(false);
 
   useEffect(() => {
     const restoreSession = async () => {
@@ -599,6 +600,7 @@ export default function App() {
       setUpdatingWordId(null);
       setDeletingWordId(null);
       setEditingWordId(null);
+      setIsResettingWords(false);
 
       setIsError(false);
       setIsModulesMessageError(false);
@@ -832,6 +834,7 @@ export default function App() {
     setEditTranslation('');
     setWordsMessage('');
     setIsWordsMessageError(false);
+    setIsResettingWords(false);
     setIsWordsLoading(true);
 
     try {
@@ -859,6 +862,7 @@ export default function App() {
     setIsWordsMessageError(false);
     setUpdatingWordId(null);
     setDeletingWordId(null);
+    setIsResettingWords(false);
   };
 
   const handleOpenCreateWordForm = () => {
@@ -1044,6 +1048,77 @@ export default function App() {
     }
   };
 
+  const handleMarkAllWordsAsUnknown = async () => {
+    if (!accessToken || !selectedModule) {
+      setWordsMessage(
+        'Pro změnu stavu slovíček se musíte přihlásit.',
+      );
+      setIsWordsMessageError(true);
+      return;
+    }
+
+    const knownWords = words.filter((wordCard) => wordCard.is_known);
+
+    if (knownWords.length === 0) {
+      return;
+    }
+
+    setIsResettingWords(true);
+    setWordsMessage('');
+    setIsWordsMessageError(false);
+
+    try {
+      const updatedWords = await Promise.all(
+        knownWords.map((wordCard) =>
+          updateWordStatusRequest(
+            accessToken,
+            wordCard.id,
+            false,
+          ),
+        ),
+      );
+
+      const updatedWordsById = new Map(
+        updatedWords.map((wordCard) => [wordCard.id, wordCard]),
+      );
+
+      setWords((currentWords) =>
+        currentWords.map(
+          (wordCard) =>
+            updatedWordsById.get(wordCard.id) ?? wordCard,
+        ),
+      );
+
+      setWordsMessage('');
+      setIsWordsMessageError(false);
+    } catch (error) {
+      console.error(
+        'Chyba při označování všech slovíček jako neznámých:',
+        error,
+      );
+
+      try {
+        const refreshedWords = await getModuleWords(
+          accessToken,
+          selectedModule.id,
+        );
+        setWords(refreshedWords);
+      } catch (refreshError) {
+        console.error(
+          'Chyba při obnovení seznamu slovíček:',
+          refreshError,
+        );
+      }
+
+      setWordsMessage(
+        'Některá slovíčka se nepodařilo označit jako neznámá.',
+      );
+      setIsWordsMessageError(true);
+    } finally {
+      setIsResettingWords(false);
+    }
+  };
+
   const handleDeleteWord = async (wordCard: WordCard) => {
     if (!accessToken) {
       setWordsMessage(
@@ -1185,19 +1260,59 @@ export default function App() {
                 </Text>
               </View>
 
-              <Pressable
-                style={({ pressed }) => [
-                  styles.createButton,
-                  pressed && styles.buttonPressed,
-                  isCreateWordFormOpen && styles.disabledButton,
-                ]}
-                onPress={handleOpenCreateWordForm}
-                disabled={isCreateWordFormOpen}
-              >
-                <Text style={styles.createButtonText}>
-                  Přidat slovíčko
-                </Text>
-              </Pressable>
+              <View style={styles.wordsHeaderActions}>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.resetWordsButton,
+                    pressed && styles.buttonPressed,
+                    (knownWordsCount === 0 || isResettingWords) &&
+                      styles.disabledButton,
+                  ]}
+                  onPress={() => {
+                    void handleMarkAllWordsAsUnknown();
+                  }}
+                  disabled={
+                    knownWordsCount === 0 ||
+                    isResettingWords ||
+                    isCreatingWord ||
+                    isSavingEditedWord ||
+                    editingWordId !== null ||
+                    updatingWordId !== null ||
+                    deletingWordId !== null
+                  }
+                >
+                  {isResettingWords ? (
+                    <ActivityIndicator
+                      size="small"
+                      color="#9a661f"
+                    />
+                  ) : (
+                    <Text style={styles.resetWordsButtonText}>
+                      Označit všechna jako neznámá
+                    </Text>
+                  )}
+                </Pressable>
+
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.createButton,
+                    pressed && styles.buttonPressed,
+                    isCreateWordFormOpen && styles.disabledButton,
+                  ]}
+                  onPress={handleOpenCreateWordForm}
+                  disabled={
+                    isCreateWordFormOpen ||
+                    isResettingWords ||
+                    isSavingEditedWord ||
+                    updatingWordId !== null ||
+                    deletingWordId !== null
+                  }
+                >
+                  <Text style={styles.createButtonText}>
+                    Přidat slovíčko
+                  </Text>
+                </Pressable>
+              </View>
             </View>
 
             {isCreateWordFormOpen && (
@@ -1454,6 +1569,7 @@ export default function App() {
                           disabled={
                             isUpdating ||
                             isDeleting ||
+                            isResettingWords ||
                             isSavingEditedWord ||
                             updatingWordId !== null ||
                             deletingWordId !== null
@@ -1495,6 +1611,7 @@ export default function App() {
                             isEditing ||
                             isDeleting ||
                             isUpdating ||
+                            isResettingWords ||
                             isSavingEditedWord ||
                             deletingWordId !== null ||
                             updatingWordId !== null
@@ -1517,6 +1634,7 @@ export default function App() {
                           disabled={
                             isDeleting ||
                             isUpdating ||
+                            isResettingWords ||
                             isSavingEditedWord ||
                             deletingWordId !== null ||
                             updatingWordId !== null
@@ -2217,6 +2335,32 @@ const styles = StyleSheet.create({
   wordsTitleContainer: {
     marginRight: 20,
     marginBottom: 16,
+  },
+
+  wordsHeaderActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+  },
+
+  resetWordsButton: {
+    minHeight: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+    marginBottom: 16,
+    paddingHorizontal: 18,
+    backgroundColor: '#fff4e5',
+    borderWidth: 1,
+    borderColor: '#f2d4a8',
+    borderRadius: 12,
+  },
+
+  resetWordsButtonText: {
+    color: '#9a661f',
+    fontSize: 14,
+    fontWeight: '700',
   },
 
   sectionTitle: {
